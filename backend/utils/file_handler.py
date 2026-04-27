@@ -48,8 +48,9 @@ def save_file(file, subfolder=""):
 def delete_file(file_path):
     """Delete uploaded file"""
     if file_path:
+        relative_path = file_path.lstrip("/")
         full_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", file_path
+            os.path.dirname(os.path.abspath(__file__)), "..", relative_path
         )
         full_path = os.path.normpath(full_path)
 

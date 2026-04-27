@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, X } from 'lucide-react';
-import { children, agencies } from '../api/api';
+import { children } from '../api/api';
 import Modal from '../components/Modal';
 
 function ChildrenPage({ user }) {
   const [childrenList, setChildrenList] = useState([]);
-  const [agenciesList, setAgenciesList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -14,7 +13,6 @@ function ChildrenPage({ user }) {
     full_name: '',
     gender: '',
     date_of_birth: '',
-    agency_id: '',
     current_status: 'pending',
     admission_date: ''
   });
@@ -26,7 +24,6 @@ function ChildrenPage({ user }) {
 
   useEffect(() => {
     loadChildren();
-    loadAgencies();
   }, []);
 
   const loadChildren = async () => {
@@ -40,14 +37,7 @@ function ChildrenPage({ user }) {
     }
   };
 
-  const loadAgencies = async () => {
-    try {
-      const response = await agencies.getAll();
-      setAgenciesList(response.data.agencies || []);
-    } catch (err) {
-      console.error('Failed to load agencies:', err);
-    }
-  };
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -87,7 +77,6 @@ function ChildrenPage({ user }) {
       full_name: child.full_name || '',
       gender: child.gender || '',
       date_of_birth: child.date_of_birth || '',
-      agency_id: child.agency_id || '',
       current_status: child.current_status || 'pending',
       admission_date: child.admission_date || ''
     });
@@ -100,7 +89,6 @@ function ChildrenPage({ user }) {
       full_name: '',
       gender: '',
       date_of_birth: '',
-      agency_id: '',
       current_status: 'pending',
       admission_date: ''
     });
@@ -246,21 +234,7 @@ function ChildrenPage({ user }) {
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="child-agency">Agency *</label>
-              <select
-                id="child-agency"
-                className="form-select"
-                value={formData.agency_id}
-                onChange={(e) => setFormData({ ...formData, agency_id: e.target.value })}
-                required
-              >
-                <option value="">Select Agency</option>
-                {agenciesList.map((agency) => (
-                  <option key={agency._id} value={agency._id}>{agency.name}</option>
-                ))}
-              </select>
-            </div>
+
 
             <div className="form-group">
               <label className="form-label" htmlFor="child-status">Status</label>

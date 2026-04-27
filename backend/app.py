@@ -163,7 +163,7 @@ def soft_delete_record(collection_name, record_id, user_id):
             {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
         )
         return result.modified_count > 0
-    except:
+    except Exception:
         return False
 
 
@@ -213,21 +213,21 @@ def get_user_agency_id(user_data):
             staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
             if staff and staff.get("agency_id"):
                 return staff["agency_id"]
-        except:
+        except Exception:
             pass
     elif role == "donor":
         try:
             donor = get_collection("donors").find_one({"_id": ObjectId(user_id)})
             if donor and donor.get("agency_id"):
                 return donor["agency_id"]
-        except:
+        except Exception:
             pass
     elif role == "guardian":
         try:
             guardian = get_collection("guardians").find_one({"_id": ObjectId(user_id)})
             if guardian and guardian.get("agency_id"):
                 return guardian["agency_id"]
-        except:
+        except Exception:
             pass
 
     return None
@@ -1729,18 +1729,29 @@ def get_stats():
     if role not in ("admin", "staff"):
         return error_response("Insufficient permissions", 403)
 
+    agency_id = get_user_agency_id(request.user_data)
+    base_query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
     stats = {
-        "total_children": get_collection("children").count_documents({}),
-        "total_guardians": get_collection("guardians").count_documents({}),
-        "total_donors": get_collection("donors").count_documents({}),
-        "total_donations": get_collection("donations").count_documents({}),
-        "total_staff": get_collection("staff").count_documents({}),
-        "total_agencies": get_collection("agencies").count_documents({}),
+        "total_children": get_collection("children").count_documents(base_query),
+        "total_guardians": get_collection("guardians").count_documents(base_query),
+        "total_donors": get_collection("donors").count_documents(base_query),
+        "total_donations": get_collection("donations").count_documents(
+            {"agency_id": agency_id} if agency_id else {}
+        ),
+        "total_staff": get_collection("staff").count_documents(base_query),
+        "total_agencies": get_collection("agencies").count_documents(
+            get_soft_delete_query({})
+        ),
         "pending_children": get_collection("children").count_documents(
-            {"current_status": "pending"}
+            get_soft_delete_query(
+                {"current_status": "pending", **({"agency_id": agency_id} if agency_id else {})}
+            )
         ),
         "in_foster": get_collection("children").count_documents(
-            {"current_status": "in_foster"}
+            get_soft_delete_query(
+                {"current_status": "in_foster", **({"agency_id": agency_id} if agency_id else {})}
+            )
         ),
     }
 

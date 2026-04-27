@@ -1,6 +1,7 @@
 import os
 import bcrypt
 import binascii
+from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -45,17 +46,17 @@ def get_current_user(token):
     try:
         if role in ("admin", "staff"):
             collection = database.get_collection("staff")
-            user = collection.find_one({"_id": user_id})
+            user = collection.find_one({"_id": ObjectId(user_id)})
             if user:
                 user["collection"] = "staff"
         elif role == "donor":
             collection = database.get_collection("donors")
-            user = collection.find_one({"_id": user_id})
+            user = collection.find_one({"_id": ObjectId(user_id)})
             if user:
                 user["collection"] = "donors"
         elif role == "guardian":
             collection = database.get_collection("guardians")
-            user = collection.find_one({"_id": user_id})
+            user = collection.find_one({"_id": ObjectId(user_id)})
             if user:
                 user["collection"] = "guardians"
         else:
