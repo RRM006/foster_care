@@ -4,17 +4,32 @@ This document describes the MongoDB collections and their schemas for the Foster
 
 ---
 
+## Multi-Center Architecture
+
+The system supports **multiple Foster Care Centers (Agencies)**. Each center operates independently with its own:
+- Admin user
+- Staff members
+- Children
+- Guardians
+- Donors
+- Donations
+- Child Records
+
+All entities (except agencies themselves) are linked to a specific `agency_id` to ensure data isolation between centers.
+
+---
+
 ## Collections Overview
 
 | Collection | Description |
 |-----------|-------------|
-| agencies | Child welfare agencies |
-| donors | Individual/NGO donors |
-| children | Orphaned children records |
-| guardians | Foster families and guardians |
-| staff | Social workers and employees |
-| child_records | Health and education records |
-| donations | Donation history and tracking |
+| agencies | Foster care centers (each admin creates one) |
+| donors | Individual/NGO donors (linked to agency) |
+| children | Orphaned children records (linked to agency) |
+| guardians | Foster families and guardians (linked to agency) |
+| staff | Social workers and employees (linked to agency) |
+| child_records | Health and education records (linked to agency via child) |
+| donations | Donation history and tracking (linked to agency) |
 
 ---
 
@@ -55,6 +70,7 @@ This document describes the MongoDB collections and their schemas for the Foster
   "email": "string",
   "password": "hashed_string",
   "role": "donor",
+  "agency_id": "ObjectId",
   "created_at": "datetime",
   "updated_at": "datetime"
 }
@@ -69,6 +85,7 @@ This document describes the MongoDB collections and their schemas for the Foster
 | email | String | Yes | Email (unique) |
 | password | String | Yes | Bcrypt hashed password |
 | role | String | Yes | Fixed: "donor" |
+| agency_id | ObjectId | Yes | Foreign key to agencies (which center donor donates to) |
 | created_at | DateTime | Yes | Creation timestamp |
 | updated_at | DateTime | Yes | Last update timestamp |
 

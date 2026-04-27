@@ -92,10 +92,26 @@ The Foster Care Management System (FCMS) aims to improve foster care in Banglade
 
 | Role | Permissions |
 |------|-------------|
-| **admin** | Full CRUD access to all collections, manage users, view all data |
-| **staff** | CRUD children, guardians, child_records; view donations |
-| **donor** | Create donations, view own donations |
+| **admin** | Full CRUD access to all data within their foster care center/agency, manage staff, view all center data |
+| **staff** | CRUD children, guardians, child_records; view donations within their center |
+| **donor** | Create donations, view own donations to their center |
 | **guardian** | View assigned child info only |
+
+---
+
+## Multi-Center Architecture
+
+Each Foster Care Center (Agency) operates independently:
+- **Admin**: Creates their own center during registration by providing a center name
+- **Staff/Donor/Guardian**: Selects their center from a dropdown list during registration
+- **Children, Guardians, Donors**: All associated with a specific center
+- **Data Isolation**: Users can only see and manage data from their own center
+
+### Registration Flow
+1. **Admin**: Select "Admin (Foster Care Center)" → Enter center name → Creates new agency
+2. **Staff**: Select "Staff" → Select from existing centers dropdown
+3. **Donor**: Select "Donor" → Select from existing centers dropdown
+4. **Guardian**: Select "Guardian" → Select from existing centers dropdown
 
 ---
 
@@ -182,7 +198,6 @@ foster_care/
 ### Step 1: Clone the Repository
 
 ```bash
-cd /home/rafi/Workspace/Projects/cse411
 git clone <your-repo-url>
 cd foster_care
 ```
@@ -191,7 +206,6 @@ cd foster_care
 
 #### Create virtual environment
 ```bash
-# Navigate to backend folder
 cd backend
 
 # Create virtual environment (Windows)
@@ -209,16 +223,7 @@ source venv/bin/activate
 
 #### Install Python dependencies
 ```bash
-pip install flask flask-cors pymongo pymongo[srv] python-dotenv pyjwt bcrypt
-```
-
-#### Create uploads directory
-```bash
-cd backend
-mkdir uploads
-mkdir uploads\photos
-mkdir uploads\documents
-mkdir uploads\receipts
+pip install -r requirements.txt
 ```
 
 #### Run backend server
@@ -234,13 +239,7 @@ The backend will run at: `http://localhost:5000`
 
 #### Navigate to project root
 ```bash
-cd /home/rafi/Workspace/Projects/cse411/foster_care
-```
-
-#### Create Vite React project
-```bash
-# Create React app with Vite
-npm create vite@latest frontend -- --template react
+cd foster_care
 ```
 
 #### Install dependencies
@@ -275,7 +274,7 @@ python app.py
 
 #### Terminal 2: Frontend
 ```bash
-cd /home/rafi/Workspace/Projects/cse411/foster_care/frontend
+cd frontend
 npm run dev
 ```
 
@@ -283,6 +282,19 @@ npm run dev
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:5000
 - API Documentation: See [API_Endpoints.md](./API_Endpoints.md)
+
+---
+
+## Running the Project (Quick Start)
+
+The fastest way to run both frontend and backend:
+
+```bash
+cd foster_care
+./start
+```
+
+This will start both services. Press Ctrl+C to stop both.
 
 ---
 

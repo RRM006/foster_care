@@ -35,25 +35,53 @@ except Exception as e:
 
 # Field whitelists: only these keys are allowed through on create/update
 CHILD_FIELDS = {
-    "full_name", "gender", "date_of_birth", "agency_id",
-    "current_status", "admission_date", "photo_url", "documents",
+    "full_name",
+    "gender",
+    "date_of_birth",
+    "agency_id",
+    "current_status",
+    "admission_date",
+    "photo_url",
+    "documents",
 }
 GUARDIAN_FIELDS = {
-    "full_name", "phone", "address", "national_id", "child_id", "verified",
+    "full_name",
+    "phone",
+    "address",
+    "national_id",
+    "child_id",
+    "verified",
 }
 STAFF_FIELDS = {
-    "full_name", "email", "phone", "role_field", "agency_id", "status",
+    "full_name",
+    "email",
+    "phone",
+    "role_field",
+    "agency_id",
+    "status",
 }
 DONOR_FIELDS = {
-    "full_name", "email", "phone", "donor_type",
+    "full_name",
+    "email",
+    "phone",
+    "donor_type",
 }
 DONATION_FIELDS = {
-    "donor_id", "agency_id", "amount", "purpose", "donation_date",
-    "reference_no", "receipt_url",
+    "donor_id",
+    "agency_id",
+    "amount",
+    "purpose",
+    "donation_date",
+    "reference_no",
+    "receipt_url",
 }
 AGENCY_FIELDS = {"name", "address", "phone", "email"}
 CHILD_RECORD_FIELDS = {
-    "child_id", "health_status", "education_level", "last_visit_date", "notes",
+    "child_id",
+    "health_status",
+    "education_level",
+    "last_visit_date",
+    "notes",
 }
 
 # Valid enum values
@@ -99,6 +127,110 @@ def success_response(data, status_code=200):
     if isinstance(data, str):
         return jsonify({"message": data, "status": status_code}), status_code
     return jsonify({**data, "status": status_code}), status_code
+
+
+import re
+
+
+def validate_email(email):
+    """Validate email format"""
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    return re.match(pattern, email) is not None
+
+
+def validate_phone(phone):
+    """Validate phone number (Bangladesh format)"""
+    if not phone:
+        return True  # Phone is optional
+    # Bangladesh: +880 followed by 10 digits, or 01 followed by 10 digits
+    pattern = r"^(\+8801[3-9]\d{8}|01[3-9]\d{9})$"
+    return re.match(pattern, phone) is not None
+
+
+def validate_name(name):
+    """Validate name (letters, spaces, hyphens only)"""
+    if not name:
+        return False
+    pattern = r"^[a-zA-Z\s\-\.]+$"
+    return re.match(pattern, name) is not None
+
+
+def soft_delete_record(collection_name, record_id, user_id):
+    """Soft delete a record - mark as deleted instead of removing"""
+    try:
+        result = get_collection(collection_name).update_one(
+            {"_id": ObjectId(record_id)},
+            {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+        )
+        return result.modified_count > 0
+    except:
+        return False
+
+
+def get_soft_delete_query(additional_query=None):
+    """Get query that excludes soft-deleted records"""
+    base_query = {"deleted_at": None}
+    if additional_query:
+        base_query.update(additional_query)
+    return base_query
+
+
+def log_audit_event(
+    user_id,
+    action,
+    collection_name,
+    record_id,
+    old_value=None,
+    new_value=None,
+    agency_id=None,
+):
+    """Log an audit event for tracking changes"""
+    try:
+        audit_data = {
+            "user_id": user_id,
+            "action": action,  # create, update, delete, login, logout
+            "collection_name": collection_name,
+            "record_id": str(record_id) if record_id else None,
+            "old_value": old_value,
+            "new_value": new_value,
+            "agency_id": agency_id,
+            "timestamp": utcnow(),
+        }
+        get_collection("audit_logs").insert_one(audit_data)
+        return True
+    except Exception as e:
+        print(f"Audit logging failed: {e}")
+        return False
+
+
+def get_user_agency_id(user_data):
+    """Get the agency_id from the current user's profile"""
+    user_id = user_data.get("user_id")
+    role = user_data.get("role")
+
+    if role in ("admin", "staff"):
+        try:
+            staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
+            if staff and staff.get("agency_id"):
+                return staff["agency_id"]
+        except:
+            pass
+    elif role == "donor":
+        try:
+            donor = get_collection("donors").find_one({"_id": ObjectId(user_id)})
+            if donor and donor.get("agency_id"):
+                return donor["agency_id"]
+        except:
+            pass
+    elif role == "guardian":
+        try:
+            guardian = get_collection("guardians").find_one({"_id": ObjectId(user_id)})
+            if guardian and guardian.get("agency_id"):
+                return guardian["agency_id"]
+        except:
+            pass
+
+    return None
 
 
 # ==================== DECORATORS ====================
@@ -181,7 +313,26 @@ def register():
 
     # Validate role
     if role not in VALID_ROLES:
-        return error_response(f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}", 400)
+        return error_response(
+            f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}", 400
+        )
+
+    # Validate email format
+    if not validate_email(email):
+        return error_response("Invalid email format", 400)
+
+    # Validate name format
+    if not validate_name(name):
+        return error_response(
+            "Invalid name format (letters, spaces, hyphens only)", 400
+        )
+
+    # Validate phone if provided
+    phone = str(data.get("phone", "")).strip()
+    if phone and not validate_phone(phone):
+        return error_response(
+            "Invalid phone number format (use Bangladesh format)", 400
+        )
 
     # Validate password length
     if len(password) < 6:
@@ -208,28 +359,86 @@ def register():
         "updated_at": utcnow(),
     }
 
+    # For admin role, create agency first
+    agency_id = None
+    if role == "admin":
+        agency_name = str(data.get("agencyName", "")).strip()
+        if not agency_name:
+            return error_response("Agency name is required for admin registration", 400)
+
+        agencies_collection = get_collection("agencies")
+        agency_result = agencies_collection.insert_one(
+            {
+                "name": agency_name,
+                "address": str(data.get("address", "")).strip(),
+                "phone": str(data.get("phone", "")).strip(),
+                "email": email,
+                "created_at": utcnow(),
+                "updated_at": utcnow(),
+            }
+        )
+        agency_id = agency_result.inserted_id
+    elif role in ("staff", "donor", "guardian"):
+        # Get agency_id from request for non-admin roles
+        provided_agency_id = data.get("agency_id")
+        if not provided_agency_id:
+            return error_response(
+                "Agency selection is required for staff/donor/guardian", 400
+            )
+
+        # Validate agency exists
+        try:
+            agency_obj_id = ObjectId(provided_agency_id)
+            agency = get_collection("agencies").find_one({"_id": agency_obj_id})
+            if not agency:
+                return error_response("Invalid agency selected", 400)
+            agency_id = agency_obj_id
+        except InvalidId:
+            return error_response("Invalid agency ID format", 400)
+
     if role == "donor":
         donor_type = str(data.get("donor_type", "individual")).strip()
         if donor_type not in VALID_DONOR_TYPES:
             donor_type = "individual"
         user_data["donor_type"] = donor_type
         user_data["phone"] = str(data.get("phone", "")).strip()
+        user_data["agency_id"] = agency_id
     elif role == "guardian":
         user_data["phone"] = str(data.get("phone", "")).strip()
         user_data["address"] = str(data.get("address", "")).strip()
         user_data["national_id"] = str(data.get("national_id", "")).strip()
         user_data["verified"] = False
         user_data["child_id"] = data.get("child_id", None)
+        user_data["agency_id"] = agency_id
     elif role in ("staff", "admin"):
         user_data["role_field"] = role
         user_data["status"] = "active"
-        user_data["agency_id"] = data.get("agency_id", None)
+        user_data["agency_id"] = agency_id
         user_data["phone"] = str(data.get("phone", "")).strip()
 
     result = collection.insert_one(user_data)
 
+    # Audit log - user registration
+    collection_name = "staff" if role in ("admin", "staff") else f"{role}s"
+    log_audit_event(
+        str(result.inserted_id),
+        "create",
+        collection_name,
+        result.inserted_id,
+        None,
+        {"email": email, "role": role},
+        agency_id,
+    )
+
     # Generate token
     token = generate_token(str(result.inserted_id), role)
+
+    # Get agency name if applicable
+    agency_name = None
+    if agency_id:
+        agency = get_collection("agencies").find_one({"_id": agency_id})
+        if agency:
+            agency_name = agency.get("name")
 
     return success_response(
         {
@@ -240,6 +449,7 @@ def register():
                 "name": name,
                 "email": email,
                 "role": role,
+                "agency_name": agency_name,
             },
         },
         201,
@@ -293,6 +503,25 @@ def login():
     # Generate token
     token = generate_token(str(user["_id"]), role)
 
+    # Audit log - login action
+    log_audit_event(
+        str(user["_id"]),
+        "login",
+        "auth",
+        str(user["_id"]),
+        None,
+        None,
+        user.get("agency_id"),
+    )
+
+    # Get agency name if applicable
+    agency_name = None
+    agency_id = user.get("agency_id")
+    if agency_id:
+        agency = get_collection("agencies").find_one({"_id": agency_id})
+        if agency:
+            agency_name = agency.get("name")
+
     return success_response(
         {
             "message": "Login successful",
@@ -302,6 +531,7 @@ def login():
                 "name": user.get("full_name"),
                 "email": user.get("email"),
                 "role": role,
+                "agency_name": agency_name,
             },
         }
     )
@@ -332,33 +562,128 @@ def get_current_user_info():
     return jsonify({"user": user})
 
 
+@app.route("/api/auth/profile", methods=["PUT"])
+@token_required
+def update_profile():
+    """Update current user's profile (name, phone)"""
+    payload = request.user_data
+    user_id = payload.get("user_id")
+    role = payload.get("role")
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    try:
+        collection = get_collection(
+            "staff" if role in ("admin", "staff") else f"{role}s"
+        )
+        update_data = {}
+
+        if data.get("name"):
+            update_data["full_name"] = str(data.get("name")).strip()
+        if data.get("phone"):
+            update_data["phone"] = str(data.get("phone")).strip()
+
+        if not update_data:
+            return error_response("No valid fields to update", 400)
+
+        update_data["updated_at"] = utcnow()
+
+        result = collection.update_one(
+            {"_id": ObjectId(user_id)}, {"$set": update_data}
+        )
+
+        if result.matched_count == 0:
+            return error_response("User not found", 404)
+
+        return success_response("Profile updated successfully")
+    except InvalidId:
+        return error_response("Invalid user ID", 400)
+
+
+@app.route("/api/auth/change-password", methods=["PUT"])
+@token_required
+def change_password():
+    """Change current user's password"""
+    payload = request.user_data
+    user_id = payload.get("user_id")
+    role = payload.get("role")
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not current_password or not new_password:
+        return error_response("Current password and new password are required", 400)
+
+    if len(new_password) < 6:
+        return error_response("New password must be at least 6 characters", 400)
+
+    try:
+        collection = get_collection(
+            "staff" if role in ("admin", "staff") else f"{role}s"
+        )
+        user = collection.find_one({"_id": ObjectId(user_id)})
+
+        if not user:
+            return error_response("User not found", 404)
+
+        if not verify_password(current_password, user.get("password", "")):
+            return error_response("Current password is incorrect", 400)
+
+        collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"password": hash_password(new_password), "updated_at": utcnow()}},
+        )
+
+        return success_response("Password changed successfully")
+    except InvalidId:
+        return error_response("Invalid user ID", 400)
+
+
 # ==================== CHILDREN ROUTES ====================
 
 
 @app.route("/api/children", methods=["GET"])
 @token_required
 def get_children():
-    """Get all children (admin/staff only) with pagination"""
+    """Get all children (admin/staff only) with pagination and search"""
     role = request.user_data.get("role")
     if role not in ("admin", "staff"):
         return error_response("Insufficient permissions", 403)
 
     page, limit, skip = get_pagination_params()
+    search = request.args.get("search", "").strip()
 
-    total = get_collection("children").count_documents({})
-    children_list = list(
-        get_collection("children").find().skip(skip).limit(limit)
-    )
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    # Add search filter
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"gender": {"$regex": search, "$options": "i"}},
+            {"current_status": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = get_collection("children").count_documents(query)
+    children_list = list(get_collection("children").find(query).skip(skip).limit(limit))
     for child in children_list:
         child["_id"] = str(child["_id"])
         child.pop("documents", None)
 
-    return jsonify({
-        "children": children_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "children": children_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/children", methods=["POST"])
@@ -373,8 +698,13 @@ def create_child():
     if not data:
         return error_response("Request body is required", 400)
 
-    if not data.get("full_name") or not data.get("agency_id"):
-        return error_response("full_name and agency_id are required", 400)
+    if not data.get("full_name"):
+        return error_response("full_name is required", 400)
+
+    # Get agency_id from user's profile
+    agency_id = get_user_agency_id(request.user_data)
+    if not agency_id:
+        return error_response("User is not associated with any agency", 400)
 
     # Validate enum fields
     status = str(data.get("current_status", "pending")).strip()
@@ -392,11 +722,19 @@ def create_child():
     child_data = sanitize_data(data, CHILD_FIELDS)
     child_data["current_status"] = status
     child_data["gender"] = gender
+    child_data["agency_id"] = agency_id
     child_data.setdefault("admission_date", utcnow().strftime("%Y-%m-%d"))
     child_data["created_at"] = utcnow()
     child_data["updated_at"] = utcnow()
 
     result = get_collection("children").insert_one(child_data)
+
+    # Audit log
+    user_id = request.user_data.get("user_id")
+    agency_id = get_user_agency_id(request.user_data)
+    log_audit_event(
+        user_id, "create", "children", result.inserted_id, None, child_data, agency_id
+    )
 
     return success_response(
         {"message": "Child created successfully", "child_id": str(result.inserted_id)},
@@ -444,7 +782,8 @@ def update_child(child_id):
     if "gender" in safe_data:
         if safe_data["gender"] not in VALID_GENDERS:
             return error_response(
-                f"Invalid gender. Must be one of: {', '.join(VALID_GENDERS - {''})}", 400
+                f"Invalid gender. Must be one of: {', '.join(VALID_GENDERS - {''})}",
+                400,
             )
 
     safe_data["updated_at"] = utcnow()
@@ -465,20 +804,98 @@ def update_child(child_id):
 @app.route("/api/children/<child_id>", methods=["DELETE"])
 @token_required
 def delete_child(child_id):
-    """Delete child (admin only)"""
+    """Delete child (soft delete - admin only)"""
     role = request.user_data.get("role")
     if role != "admin":
         return error_response("Admin access required", 403)
 
+    user_id = request.user_data.get("user_id")
+    agency_id = get_user_agency_id(request.user_data)
+
     try:
-        result = get_collection("children").delete_one({"_id": ObjectId(child_id)})
+        deleted = soft_delete_record("children", child_id, user_id)
     except InvalidId:
         return error_response("Invalid child ID format", 400)
 
-    if result.deleted_count == 0:
+    if not deleted:
         return error_response("Child not found", 404)
 
-    return success_response("Child deleted successfully")
+    # Audit log
+    log_audit_event(user_id, "delete", "children", child_id, None, None, agency_id)
+
+    return success_response("Child deleted successfully (soft delete)")
+
+
+@app.route("/api/children/<child_id>/assign", methods=["PUT"])
+@token_required
+def assign_child_to_guardian(child_id):
+    """Assign a child to a guardian"""
+    role = request.user_data.get("role")
+    if role not in ("admin", "staff"):
+        return error_response("Insufficient permissions", 403)
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    guardian_id = data.get("guardian_id")
+    if not guardian_id:
+        return error_response("guardian_id is required", 400)
+
+    try:
+        child_obj_id = ObjectId(child_id)
+        guardian_obj_id = ObjectId(guardian_id)
+    except InvalidId:
+        return error_response("Invalid ID format", 400)
+
+    agency_id = get_user_agency_id(request.user_data)
+    user_id = request.user_data.get("user_id")
+
+    # Verify child belongs to user's agency
+    child = get_collection("children").find_one(
+        {"_id": child_obj_id, "agency_id": agency_id}
+    )
+    if not child:
+        return error_response("Child not found", 404)
+
+    # Verify guardian belongs to user's agency
+    guardian = get_collection("guardians").find_one(
+        {"_id": guardian_obj_id, "agency_id": agency_id, "verified": True}
+    )
+    if not guardian:
+        return error_response("Guardian not found or not verified", 404)
+
+    # Update child with guardian assignment
+    old_guardian_id = child.get("guardian_id")
+    get_collection("children").update_one(
+        {"_id": child_obj_id},
+        {
+            "$set": {
+                "guardian_id": guardian_obj_id,
+                "current_status": "in_foster",
+                "updated_at": utcnow(),
+            }
+        },
+    )
+
+    # Also update guardian's child_id
+    get_collection("guardians").update_one(
+        {"_id": guardian_obj_id},
+        {"$set": {"child_id": child_obj_id, "updated_at": utcnow()}},
+    )
+
+    # Audit log
+    log_audit_event(
+        user_id,
+        "assign",
+        "children",
+        child_id,
+        {"guardian_id": str(old_guardian_id) if old_guardian_id else None},
+        {"guardian_id": guardian_id},
+        agency_id,
+    )
+
+    return success_response(f"Child assigned to guardian {guardian.get('full_name')}")
 
 
 # ==================== GUARDIANS ROUTES ====================
@@ -487,26 +904,39 @@ def delete_child(child_id):
 @app.route("/api/guardians", methods=["GET"])
 @token_required
 def get_guardians():
-    """Get all guardians with pagination"""
+    """Get all guardians with pagination and search"""
     role = request.user_data.get("role")
     if role not in ("admin", "staff"):
         return error_response("Insufficient permissions", 403)
 
     page, limit, skip = get_pagination_params()
+    search = request.args.get("search", "").strip()
 
-    total = get_collection("guardians").count_documents({})
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}},
+            {"address": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = get_collection("guardians").count_documents(query)
     guardians_list = list(
-        get_collection("guardians").find().skip(skip).limit(limit)
+        get_collection("guardians").find(query).skip(skip).limit(limit)
     )
     for guardian in guardians_list:
         guardian["_id"] = str(guardian["_id"])
 
-    return jsonify({
-        "guardians": guardians_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "guardians": guardians_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/guardians", methods=["POST"])
@@ -521,10 +951,17 @@ def create_guardian():
     if not data:
         return error_response("Request body is required", 400)
 
-    if not data.get("full_name") or not data.get("child_id"):
-        return error_response("full_name and child_id are required", 400)
+    if not data.get("full_name"):
+        return error_response("full_name is required", 400)
+
+    # Get agency_id from user's profile
+    agency_id = get_user_agency_id(request.user_data)
+    if not agency_id:
+        return error_response("User is not associated with any agency", 400)
 
     guardian_data = sanitize_data(data, GUARDIAN_FIELDS)
+    guardian_data["agency_id"] = agency_id
+    guardian_data.setdefault("verified", False)
     guardian_data["created_at"] = utcnow()
     guardian_data["updated_at"] = utcnow()
 
@@ -544,9 +981,7 @@ def create_guardian():
 def get_guardian(guardian_id):
     """Get guardian by ID"""
     try:
-        guardian = get_collection("guardians").find_one(
-            {"_id": ObjectId(guardian_id)}
-        )
+        guardian = get_collection("guardians").find_one({"_id": ObjectId(guardian_id)})
     except InvalidId:
         return error_response("Invalid guardian ID format", 400)
 
@@ -588,22 +1023,22 @@ def update_guardian(guardian_id):
 @app.route("/api/guardians/<guardian_id>", methods=["DELETE"])
 @token_required
 def delete_guardian(guardian_id):
-    """Delete guardian (admin only)"""
+    """Delete guardian (soft delete - admin only)"""
     role = request.user_data.get("role")
     if role != "admin":
         return error_response("Admin access required", 403)
 
+    user_id = request.user_data.get("user_id")
+
     try:
-        result = get_collection("guardians").delete_one(
-            {"_id": ObjectId(guardian_id)}
-        )
+        deleted = soft_delete_record("guardians", guardian_id, user_id)
     except InvalidId:
         return error_response("Invalid guardian ID format", 400)
 
-    if result.deleted_count == 0:
+    if not deleted:
         return error_response("Guardian not found", 404)
 
-    return success_response("Guardian deleted successfully")
+    return success_response("Guardian deleted successfully (soft delete)")
 
 
 # ==================== STAFF ROUTES ====================
@@ -612,27 +1047,38 @@ def delete_guardian(guardian_id):
 @app.route("/api/staff", methods=["GET"])
 @token_required
 def get_staff():
-    """Get all staff (admin only) with pagination"""
+    """Get all staff (admin only) with pagination and search"""
     role = request.user_data.get("role")
     if role != "admin":
         return error_response("Admin access required", 403)
 
     page, limit, skip = get_pagination_params()
+    search = request.args.get("search", "").strip()
 
-    total = get_collection("staff").count_documents({})
-    staff_list = list(
-        get_collection("staff").find().skip(skip).limit(limit)
-    )
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"role_field": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = get_collection("staff").count_documents(query)
+    staff_list = list(get_collection("staff").find(query).skip(skip).limit(limit))
     for s in staff_list:
         s["_id"] = str(s["_id"])
         s.pop("password", None)
 
-    return jsonify({
-        "staff": staff_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "staff": staff_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/staff", methods=["POST"])
@@ -652,8 +1098,12 @@ def create_staff():
         if field not in data or not str(data[field]).strip():
             return error_response(f"{field} is required", 400)
 
+    agency_id = get_user_agency_id(request.user_data)
+    if not agency_id:
+        return error_response("User is not associated with any agency", 400)
+
     staff_data = {
-        "agency_id": data.get("agency_id"),
+        "agency_id": agency_id,
         "full_name": str(data.get("full_name")).strip(),
         "role_field": data.get("role", "staff"),
         "phone": str(data.get("phone", "")).strip(),
@@ -737,20 +1187,22 @@ def update_staff(staff_id):
 @app.route("/api/staff/<staff_id>", methods=["DELETE"])
 @token_required
 def delete_staff(staff_id):
-    """Delete staff (admin only)"""
+    """Delete staff (soft delete - admin only)"""
     role = request.user_data.get("role")
     if role != "admin":
         return error_response("Admin access required", 403)
 
+    user_id = request.user_data.get("user_id")
+
     try:
-        result = get_collection("staff").delete_one({"_id": ObjectId(staff_id)})
+        deleted = soft_delete_record("staff", staff_id, user_id)
     except InvalidId:
         return error_response("Invalid staff ID format", 400)
 
-    if result.deleted_count == 0:
+    if not deleted:
         return error_response("Staff not found", 404)
 
-    return success_response("Staff deleted successfully")
+    return success_response("Staff deleted successfully (soft delete)")
 
 
 # ==================== DONORS ROUTES ====================
@@ -759,27 +1211,38 @@ def delete_staff(staff_id):
 @app.route("/api/donors", methods=["GET"])
 @token_required
 def get_donors():
-    """Get all donors (admin/staff) with pagination"""
+    """Get all donors (admin/staff) with pagination and search"""
     role = request.user_data.get("role")
     if role not in ("admin", "staff"):
         return error_response("Insufficient permissions", 403)
 
     page, limit, skip = get_pagination_params()
+    search = request.args.get("search", "").strip()
 
-    total = get_collection("donors").count_documents({})
-    donors_list = list(
-        get_collection("donors").find().skip(skip).limit(limit)
-    )
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"donor_type": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = get_collection("donors").count_documents(query)
+    donors_list = list(get_collection("donors").find(query).skip(skip).limit(limit))
     for donor in donors_list:
         donor["_id"] = str(donor["_id"])
         donor.pop("password", None)
 
-    return jsonify({
-        "donors": donors_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "donors": donors_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/donors", methods=["POST"])
@@ -808,6 +1271,7 @@ def create_donor():
         "email": str(data.get("email")).strip().lower(),
         "password": hash_password(str(data.get("password"))),
         "role": "donor",
+        "agency_id": get_user_agency_id(request.user_data),
         "created_at": utcnow(),
         "updated_at": utcnow(),
     }
@@ -874,20 +1338,22 @@ def update_donor(donor_id):
 @app.route("/api/donors/<donor_id>", methods=["DELETE"])
 @token_required
 def delete_donor(donor_id):
-    """Delete donor (admin only)"""
+    """Delete donor (soft delete - admin only)"""
     role = request.user_data.get("role")
     if role != "admin":
         return error_response("Admin access required", 403)
 
+    user_id = request.user_data.get("user_id")
+
     try:
-        result = get_collection("donors").delete_one({"_id": ObjectId(donor_id)})
+        deleted = soft_delete_record("donors", donor_id, user_id)
     except InvalidId:
         return error_response("Invalid donor ID format", 400)
 
-    if result.deleted_count == 0:
+    if not deleted:
         return error_response("Donor not found", 404)
 
-    return success_response("Donor deleted successfully")
+    return success_response("Donor deleted successfully (soft delete)")
 
 
 # ==================== DONATIONS ROUTES ====================
@@ -903,19 +1369,24 @@ def get_donations():
 
     page, limit, skip = get_pagination_params()
 
-    total = get_collection("donations").count_documents({})
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    total = get_collection("donations").count_documents(query)
     donations_list = list(
-        get_collection("donations").find().skip(skip).limit(limit)
+        get_collection("donations").find(query).skip(skip).limit(limit)
     )
     for donation in donations_list:
         donation["_id"] = str(donation["_id"])
 
-    return jsonify({
-        "donations": donations_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "donations": donations_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/donations", methods=["POST"])
@@ -926,10 +1397,14 @@ def create_donation():
     if not data:
         return error_response("Request body is required", 400)
 
-    required_fields = ["donor_id", "agency_id", "amount"]
+    required_fields = ["donor_id", "amount"]
     for field in required_fields:
         if field not in data:
             return error_response(f"{field} is required", 400)
+
+    agency_id = get_user_agency_id(request.user_data)
+    if not agency_id:
+        return error_response("User is not associated with any agency", 400)
 
     # Validate amount
     try:
@@ -941,9 +1416,8 @@ def create_donation():
 
     donation_data = sanitize_data(data, DONATION_FIELDS)
     donation_data["amount"] = amount
-    donation_data.setdefault(
-        "donation_date", utcnow().strftime("%Y-%m-%d")
-    )
+    donation_data["agency_id"] = agency_id
+    donation_data.setdefault("donation_date", utcnow().strftime("%Y-%m-%d"))
     donation_data["created_at"] = utcnow()
     donation_data["updated_at"] = utcnow()
 
@@ -963,9 +1437,7 @@ def create_donation():
 def get_donation(donation_id):
     """Get donation by ID"""
     try:
-        donation = get_collection("donations").find_one(
-            {"_id": ObjectId(donation_id)}
-        )
+        donation = get_collection("donations").find_one({"_id": ObjectId(donation_id)})
     except InvalidId:
         return error_response("Invalid donation ID format", 400)
 
@@ -982,22 +1454,41 @@ def get_donation(donation_id):
 @app.route("/api/agencies", methods=["GET"])
 @token_required
 def get_agencies():
-    """Get all agencies with pagination"""
+    """Get all agencies with pagination (admin sees own agency only)"""
+    role = request.user_data.get("role")
     page, limit, skip = get_pagination_params()
 
-    total = get_collection("agencies").count_documents({})
-    agencies_list = list(
-        get_collection("agencies").find().skip(skip).limit(limit)
-    )
+    agency_id = get_user_agency_id(request.user_data)
+    if role == "admin" and agency_id:
+        query = get_soft_delete_query({"_id": agency_id})
+    else:
+        query = get_soft_delete_query({})
+
+    total = get_collection("agencies").count_documents(query)
+    agencies_list = list(get_collection("agencies").find(query).skip(skip).limit(limit))
     for agency in agencies_list:
         agency["_id"] = str(agency["_id"])
 
-    return jsonify({
-        "agencies": agencies_list,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "agencies": agencies_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
+
+
+@app.route("/api/agencies/list", methods=["GET"])
+def get_agencies_public():
+    """Get all agencies for registration dropdown (public, no auth required)"""
+    try:
+        agencies = list(get_collection("agencies").find({}, {"_id": 1, "name": 1}))
+        for agency in agencies:
+            agency["_id"] = str(agency["_id"])
+        return jsonify({"agencies": agencies})
+    except Exception as e:
+        return error_response(f"Failed to fetch agencies: {str(e)}", 500)
 
 
 @app.route("/api/agencies", methods=["POST"])
@@ -1022,7 +1513,10 @@ def create_agency():
     result = get_collection("agencies").insert_one(agency_data)
 
     return success_response(
-        {"message": "Agency created successfully", "agency_id": str(result.inserted_id)},
+        {
+            "message": "Agency created successfully",
+            "agency_id": str(result.inserted_id),
+        },
         201,
     )
 
@@ -1056,19 +1550,32 @@ def get_child_records():
 
     page, limit, skip = get_pagination_params()
 
-    total = get_collection("child_records").count_documents({})
-    records = list(
-        get_collection("child_records").find().skip(skip).limit(limit)
-    )
+    agency_id = get_user_agency_id(request.user_data)
+
+    if agency_id:
+        children = list(
+            get_collection("children").find(
+                get_soft_delete_query({"agency_id": agency_id}), {"_id": 1}
+            )
+        )
+        child_ids = [c["_id"] for c in children]
+        query = {"child_id": {"$in": child_ids}} if child_ids else {}
+    else:
+        query = get_soft_delete_query({})
+
+    total = get_collection("child_records").count_documents(query)
+    records = list(get_collection("child_records").find(query).skip(skip).limit(limit))
     for record in records:
         record["_id"] = str(record["_id"])
 
-    return jsonify({
-        "records": records,
-        "page": page,
-        "limit": limit,
-        "total": total,
-    })
+    return jsonify(
+        {
+            "records": records,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 @app.route("/api/child_records", methods=["POST"])
@@ -1087,9 +1594,7 @@ def create_child_record():
         return error_response("child_id is required", 400)
 
     record_data = sanitize_data(data, CHILD_RECORD_FIELDS)
-    record_data.setdefault(
-        "last_visit_date", utcnow().strftime("%Y-%m-%d")
-    )
+    record_data.setdefault("last_visit_date", utcnow().strftime("%Y-%m-%d"))
     record_data["created_at"] = utcnow()
     record_data["updated_at"] = utcnow()
 
@@ -1109,9 +1614,7 @@ def create_child_record():
 def get_child_record(record_id):
     """Get child record by ID"""
     try:
-        record = get_collection("child_records").find_one(
-            {"_id": ObjectId(record_id)}
-        )
+        record = get_collection("child_records").find_one({"_id": ObjectId(record_id)})
     except InvalidId:
         return error_response("Invalid record ID format", 400)
 
@@ -1170,7 +1673,9 @@ def upload_photo():
     if not file_path:
         return error_response("Invalid file type", 400)
 
-    return success_response({"message": "Photo uploaded successfully", "path": file_path})
+    return success_response(
+        {"message": "Photo uploaded successfully", "path": file_path}
+    )
 
 
 @app.route("/api/upload/document", methods=["POST"])
@@ -1190,7 +1695,9 @@ def upload_document():
     if not file_path:
         return error_response("Invalid file type", 400)
 
-    return success_response({"message": "Document uploaded successfully", "path": file_path})
+    return success_response(
+        {"message": "Document uploaded successfully", "path": file_path}
+    )
 
 
 @app.route("/api/upload/receipt", methods=["POST"])
@@ -1206,7 +1713,9 @@ def upload_receipt():
     if not file_path:
         return error_response("Invalid file type", 400)
 
-    return success_response({"message": "Receipt uploaded successfully", "path": file_path})
+    return success_response(
+        {"message": "Receipt uploaded successfully", "path": file_path}
+    )
 
 
 # ==================== STATS ROUTE ====================
@@ -1238,6 +1747,114 @@ def get_stats():
     return jsonify(stats)
 
 
+# ==================== REPORTS ROUTES ====================
+
+
+@app.route("/api/reports/donations", methods=["GET"])
+@token_required
+def get_donations_report():
+    """Get donations summary report"""
+    role = request.user_data.get("role")
+    if role not in ("admin", "staff"):
+        return error_response("Insufficient permissions", 403)
+
+    agency_id = get_user_agency_id(request.user_data)
+    query = {"agency_id": agency_id} if agency_id else {}
+
+    # Get total donations amount
+    pipeline = [
+        {"$match": query},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]
+    result = list(get_collection("donations").aggregate(pipeline))
+
+    total_amount = result[0]["total"] if result else 0
+    total_count = result[0]["count"] if result else 0
+
+    # Get by donor type
+    by_donor_type = list(
+        get_collection("donations").aggregate(
+            [
+                {"$match": query},
+                {
+                    "$lookup": {
+                        "from": "donors",
+                        "localField": "donor_id",
+                        "foreignField": "_id",
+                        "as": "donor",
+                    }
+                },
+                {"$unwind": {"path": "$donor", "preserveNullAndEmptyArrays": True}},
+                {
+                    "$group": {
+                        "_id": "$donor.donor_type",
+                        "total": {"$sum": "$amount"},
+                        "count": {"$sum": 1},
+                    }
+                },
+            ]
+        )
+    )
+
+    return jsonify(
+        {
+            "total_amount": total_amount,
+            "total_donations": total_count,
+            "by_donor_type": [
+                {
+                    "type": r["_id"] or "unknown",
+                    "amount": r["total"],
+                    "count": r["count"],
+                }
+                for r in by_donor_type
+            ],
+        }
+    )
+
+
+@app.route("/api/reports/children", methods=["GET"])
+@token_required
+def get_children_report():
+    """Get children statistics report"""
+    role = request.user_data.get("role")
+    if role not in ("admin", "staff"):
+        return error_response("Insufficient permissions", 403)
+
+    agency_id = get_user_agency_id(request.user_data)
+    query = get_soft_delete_query({"agency_id": agency_id} if agency_id else {})
+
+    # Get by status
+    by_status = list(
+        get_collection("children").aggregate(
+            [
+                {"$match": query},
+                {"$group": {"_id": "$current_status", "count": {"$sum": 1}}},
+            ]
+        )
+    )
+
+    # Get by gender
+    by_gender = list(
+        get_collection("children").aggregate(
+            [{"$match": query}, {"$group": {"_id": "$gender", "count": {"$sum": 1}}}]
+        )
+    )
+
+    return jsonify(
+        {
+            "by_status": [
+                {"status": r["_id"] or "unknown", "count": r["count"]}
+                for r in by_status
+            ],
+            "by_gender": [
+                {"gender": r["_id"] or "unknown", "count": r["count"]}
+                for r in by_gender
+            ],
+            "total": get_collection("children").count_documents(query),
+        }
+    )
+
+
 # ==================== FILE SERVING ====================
 
 
@@ -1245,6 +1862,52 @@ def get_stats():
 def serve_file(filename):
     """Serve uploaded files"""
     return send_from_directory(Config.UPLOAD_FOLDER, filename)
+
+
+# ==================== AUDIT LOGS ROUTES ====================
+
+
+@app.route("/api/audit-logs", methods=["GET"])
+@token_required
+def get_audit_logs():
+    """Get audit logs (admin only)"""
+    role = request.user_data.get("role")
+    if role != "admin":
+        return error_response("Admin access required", 403)
+
+    page = request.args.get("page", 1, type=int)
+    limit = request.args.get("limit", 20, type=int)
+    skip = (page - 1) * limit
+
+    agency_id = get_user_agency_id(request.user_data)
+    query = {"agency_id": agency_id} if agency_id else {}
+
+    total = get_collection("audit_logs").count_documents(query)
+    logs = list(
+        get_collection("audit_logs")
+        .find(query)
+        .sort("timestamp", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+
+    for log in logs:
+        log["_id"] = str(log["_id"])
+        log["timestamp"] = (
+            log["timestamp"].isoformat() if log.get("timestamp") else None
+        )
+        # Don't send old/new values in list view to reduce payload
+        log.pop("old_value", None)
+        log.pop("new_value", None)
+
+    return jsonify(
+        {
+            "logs": logs,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
 
 
 # ==================== HEALTH CHECK ====================

@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+import certifi
 from config import Config
 
 client = None
@@ -9,7 +10,7 @@ def init_db():
     """Initialize database connection"""
     global client, db
     try:
-        client = MongoClient(Config.MONGO_URI)
+        client = MongoClient(Config.MONGO_URI, tlsCAFile=certifi.where())
         db = client[Config.DATABASE_NAME]
 
         # Test connection
