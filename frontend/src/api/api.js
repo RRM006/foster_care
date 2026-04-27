@@ -30,6 +30,8 @@ export const auth = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  updateProfile: (data) => api.put('/auth/profile', data),
+  changePassword: (data) => api.put('/auth/change-password', data),
 };
 
 export const children = {
@@ -88,6 +90,15 @@ export const childRecords = {
 
 export const stats = {
   get: () => api.get('/stats'),
+};
+
+export const auditLogs = {
+  getAll: (page = 1, limit = 20) => api.get(`/audit-logs?page=${page}&limit=${limit}`),
+};
+
+export const reports = {
+  getDonations: () => api.get('/reports/donations'),
+  getChildren: () => api.get('/reports/children'),
 };
 
 export const upload = {
