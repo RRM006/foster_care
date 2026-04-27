@@ -9,12 +9,20 @@ function Sidebar({ user, onLogout }) {
     <aside className="sidebar">
       <div className="header-logo">
         <Building2 size={28} />
-        <h1>FCMS</h1>
+        <h1>{isAdmin ? 'Foster Care' : 'FCMS'}</h1>
       </div>
       
-      <p style={{ opacity: 0.8, marginTop: '8px', fontSize: '14px' }}>
-        Foster Care Management
-      </p>
+      {isAdmin && user?.agency_name && (
+        <p style={{ opacity: 0.8, marginTop: '8px', fontSize: '14px', color: '#B8FFB8' }}>
+          {user.agency_name}
+        </p>
+      )}
+
+      {!isAdmin && (
+        <p style={{ opacity: 0.8, marginTop: '8px', fontSize: '14px' }}>
+          Foster Care Management
+        </p>
+      )}
 
       <nav className="sidebar-nav">
         <NavLink to="/" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>

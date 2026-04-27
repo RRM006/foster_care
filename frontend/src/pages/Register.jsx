@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Mail, Lock, User, Phone, Eye, EyeOff } from 'lucide-react';
-import { auth } from '../api/api';
+import { auth, agencies } from '../api/api';
 
 function Register({ onLogin }) {
   const [formData, setFormData] = useState({
@@ -10,12 +10,41 @@ function Register({ onLogin }) {
     phone: '',
     password: '',
     confirmPassword: '',
-    role: 'donor'
+    role: 'donor',
+    agencyName: '',
+    agencyId: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [agenciesList, setAgenciesList] = useState([]);
+  const [agenciesLoading, setAgenciesLoading] = useState(false);
   const navigate = useNavigate();
+
+  const needsAgency = ['staff', 'donor', 'guardian'].includes(formData.role);
+
+  useEffect(() => {
+    if (needsAgency) {
+      setAgenciesLoading(true);
+      agencies.getPublic()
+        .then(res => {
+          setAgenciesList(res.data.agencies || []);
+        })
+        .catch(err => {
+          console.error('Failed to load agencies:', err);
+          setAgenciesList([]);
+        })
+        .finally(() => {
+          setAgenciesLoading(false);
+        });
+    }
+  }, [formData.role]);
+
+  useEffect(() => {
+    if (!needsAgency) {
+      setFormData(prev => ({ ...prev, agencyId: '' }));
+    }
+  }, [needsAgency]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -30,16 +59,31 @@ function Register({ onLogin }) {
       return;
     }
 
+    if (needsAgency && !formData.agencyId) {
+      setError('Please select a Foster Care Center');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const response = await auth.register({
+      const registerData = {
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
         password: formData.password,
         role: formData.role
-      });
+      };
+      
+      if (formData.role === 'admin' && formData.agencyName) {
+        registerData.agencyName = formData.agencyName;
+      }
+      
+      if (needsAgency && formData.agencyId) {
+        registerData.agency_id = formData.agencyId;
+      }
+      
+      const response = await auth.register(registerData);
       
       const { token, user } = response.data;
       
@@ -131,8 +175,49 @@ function Register({ onLogin }) {
               <option value="donor">Donor</option>
               <option value="staff">Staff/Social Worker</option>
               <option value="guardian">Guardian</option>
+              <option value="admin">Admin (Foster Care Center)</option>
             </select>
           </div>
+
+          {formData.role === 'admin' && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="reg-agency-name">Foster Care Center Name</label>
+              <div style={{ position: 'relative' }}>
+                <Building2 size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
+                <input
+                  id="reg-agency-name"
+                  type="text"
+                  name="agencyName"
+                  className="form-input"
+                  placeholder="Enter your center name"
+                  value={formData.agencyName}
+                  onChange={handleChange}
+                  style={{ paddingLeft: '40px' }}
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          {needsAgency && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="reg-agency-select">Select Foster Care Center</label>
+              <select
+                id="reg-agency-select"
+                name="agencyId"
+                className="form-select"
+                value={formData.agencyId}
+                onChange={handleChange}
+                disabled={agenciesLoading}
+                required
+              >
+                <option value="">{agenciesLoading ? 'Loading...' : 'Select a center'}</option>
+                {agenciesList.map(agency => (
+                  <option key={agency._id} value={agency._id}>{agency.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="reg-password">Password</label>

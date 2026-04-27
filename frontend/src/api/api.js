@@ -76,6 +76,7 @@ export const agencies = {
   create: (data) => api.post('/agencies', data),
   update: (id, data) => api.put(`/agencies/${id}`, data),
   delete: (id) => api.delete(`/agencies/${id}`),
+  getPublic: () => axios.get(`${API_BASE_URL}/agencies/list`),
 };
 
 export const childRecords = {
