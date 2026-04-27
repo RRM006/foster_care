@@ -829,7 +829,17 @@ def delete_child(child_id):
 @app.route("/api/children/<child_id>/assign", methods=["PUT"])
 @token_required
 def assign_child_to_guardian(child_id):
-    """Assign a child to a guardian"""
+    """Assign a child to a guardian using MongoDB Transaction
+
+    This demonstrates ACID transactions in MongoDB:
+    - Atomicity: Both updates happen together or not at all
+    - Consistency: Transaction ensures data integrity
+    - Isolation: Other operations see either both changes or neither
+    - Durability: Once committed, changes persist even if system fails
+    """
+    from pymongo import MongoClient
+    import certifi
+
     role = request.user_data.get("role")
     if role not in ("admin", "staff"):
         return error_response("Insufficient permissions", 403)
@@ -865,37 +875,64 @@ def assign_child_to_guardian(child_id):
     if not guardian:
         return error_response("Guardian not found or not verified", 404)
 
-    # Update child with guardian assignment
     old_guardian_id = child.get("guardian_id")
-    get_collection("children").update_one(
-        {"_id": child_obj_id},
-        {
-            "$set": {
-                "guardian_id": guardian_obj_id,
-                "current_status": "in_foster",
-                "updated_at": utcnow(),
-            }
-        },
-    )
 
-    # Also update guardian's child_id
-    get_collection("guardians").update_one(
-        {"_id": guardian_obj_id},
-        {"$set": {"child_id": child_obj_id, "updated_at": utcnow()}},
-    )
+    # Use MongoDB Transaction for atomicity
+    # This ensures both updates succeed or fail together
+    try:
+        # Get fresh client for transaction
+        mongo_client = MongoClient(Config.MONGO_URI, tlsCAFile=certifi.where())
+        db = mongo_client[Config.DATABASE_NAME]
 
-    # Audit log
-    log_audit_event(
-        user_id,
-        "assign",
-        "children",
-        child_id,
-        {"guardian_id": str(old_guardian_id) if old_guardian_id else None},
-        {"guardian_id": guardian_id},
-        agency_id,
-    )
+        with mongo_client.start_session() as session:
+            with session.start_transaction():
+                # Update child - assign to guardian and change status
+                db.children.update_one(
+                    {"_id": child_obj_id},
+                    {
+                        "$set": {
+                            "guardian_id": guardian_obj_id,
+                            "current_status": "in_foster",
+                            "updated_at": utcnow(),
+                        }
+                    },
+                    session=session,
+                )
 
-    return success_response(f"Child assigned to guardian {guardian.get('full_name')}")
+                # Update guardian - link to child
+                db.guardians.update_one(
+                    {"_id": guardian_obj_id},
+                    {"$set": {"child_id": child_obj_id, "updated_at": utcnow()}},
+                    session=session,
+                )
+
+                # If there was a previous guardian, unlink them
+                if old_guardian_id:
+                    db.guardians.update_one(
+                        {"_id": old_guardian_id},
+                        {"$set": {"child_id": None, "updated_at": utcnow()}},
+                        session=session,
+                    )
+
+        # Transaction committed successfully
+        # Audit log (outside transaction - audit should persist even if main op fails)
+        log_audit_event(
+            user_id,
+            "assign",
+            "children",
+            child_id,
+            {"guardian_id": str(old_guardian_id) if old_guardian_id else None},
+            {"guardian_id": guardian_id},
+            agency_id,
+        )
+
+        return success_response(
+            f"Child assigned to guardian {guardian.get('full_name')} (transactional)"
+        )
+
+    except Exception as e:
+        # Transaction failed - MongoDB will automatically rollback
+        return error_response(f"Assignment failed: {str(e)}", 500)
 
 
 # ==================== GUARDIANS ROUTES ====================
@@ -1745,12 +1782,18 @@ def get_stats():
         ),
         "pending_children": get_collection("children").count_documents(
             get_soft_delete_query(
-                {"current_status": "pending", **({"agency_id": agency_id} if agency_id else {})}
+                {
+                    "current_status": "pending",
+                    **({"agency_id": agency_id} if agency_id else {}),
+                }
             )
         ),
         "in_foster": get_collection("children").count_documents(
             get_soft_delete_query(
-                {"current_status": "in_foster", **({"agency_id": agency_id} if agency_id else {})}
+                {
+                    "current_status": "in_foster",
+                    **({"agency_id": agency_id} if agency_id else {}),
+                }
             )
         ),
     }
