@@ -16,6 +16,7 @@ import Sidebar from './components/Sidebar';
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -37,6 +38,10 @@ function App() {
     setUser(null);
   };
 
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
   if (loading) {
     return <div className="loading"><div className="spinner"></div></div>;
   }
@@ -56,7 +61,7 @@ function App() {
   return (
     <BrowserRouter>
       <div className="app-container">
-        <Sidebar user={user} onLogout={handleLogout} />
+        <Sidebar user={user} onLogout={handleLogout} isOpen={sidebarOpen} onToggle={toggleSidebar} />
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard user={user} />} />

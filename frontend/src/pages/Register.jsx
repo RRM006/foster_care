@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Building2, Mail, Lock, User, Phone, Eye, EyeOff } from 'lucide-react';
+import { Building2, Eye, EyeOff } from 'lucide-react';
 import { auth, agencies } from '../api/api';
 
 function Register({ onLogin }) {
@@ -107,67 +107,59 @@ function Register({ onLogin }) {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-            <Building2 size={48} color="#228B22" aria-hidden="true" />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Building2 size={32} color="#111111" aria-hidden="true" />
+            <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#111111' }}>FCMS</h1>
           </div>
-          <h1>Create Account</h1>
-          <p>Join Foster Care Management System</p>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>Create your account</p>
         </div>
 
-        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label" htmlFor="reg-name">Full Name</label>
-            <div style={{ position: 'relative' }}>
-              <User size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-              <input
-                id="reg-name"
-                type="text"
-                name="name"
-                className="form-input"
-                placeholder="Enter your full name"
-                value={formData.name}
-                onChange={handleChange}
-                style={{ paddingLeft: '40px' }}
-                required
-              />
-            </div>
+            <input
+              id="reg-name"
+              type="text"
+              name="name"
+              className="form-input"
+              placeholder="Enter your full name"
+              value={formData.name}
+              onChange={handleChange}
+              required
+            />
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="reg-email">Email</label>
-            <div style={{ position: 'relative' }}>
-              <Mail size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-              <input
-                id="reg-email"
-                type="email"
-                name="email"
-                className="form-input"
-                placeholder="Enter your email"
-                value={formData.email}
-                onChange={handleChange}
-                style={{ paddingLeft: '40px' }}
-                required
-              />
-            </div>
+            <input
+              id="reg-email"
+              type="email"
+              name="email"
+              className="form-input"
+              placeholder="you@example.com"
+              value={formData.email}
+              onChange={handleChange}
+              required
+            />
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="reg-phone">Phone Number</label>
-            <div style={{ position: 'relative' }}>
-              <Phone size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-              <input
-                id="reg-phone"
-                type="tel"
-                name="phone"
-                className="form-input"
-                placeholder="+8801234567890"
-                value={formData.phone}
-                onChange={handleChange}
-                style={{ paddingLeft: '40px' }}
-              />
-            </div>
+            <input
+              id="reg-phone"
+              type="tel"
+              name="phone"
+              className="form-input"
+              placeholder="+8801234567890"
+              value={formData.phone}
+              onChange={handleChange}
+            />
           </div>
 
           <div className="form-group">
@@ -183,20 +175,16 @@ function Register({ onLogin }) {
           {formData.role === 'admin' && (
             <div className="form-group">
               <label className="form-label" htmlFor="reg-agency-name">Foster Care Center Name</label>
-              <div style={{ position: 'relative' }}>
-                <Building2 size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-                <input
-                  id="reg-agency-name"
-                  type="text"
-                  name="agencyName"
-                  className="form-input"
-                  placeholder="Enter your center name"
-                  value={formData.agencyName}
-                  onChange={handleChange}
-                  style={{ paddingLeft: '40px' }}
-                  required
-                />
-              </div>
+              <input
+                id="reg-agency-name"
+                type="text"
+                name="agencyName"
+                className="form-input"
+                placeholder="Enter your center name"
+                value={formData.agencyName}
+                onChange={handleChange}
+                required
+              />
             </div>
           )}
 
@@ -223,16 +211,15 @@ function Register({ onLogin }) {
           <div className="form-group">
             <label className="form-label" htmlFor="reg-password">Password</label>
             <div style={{ position: 'relative' }}>
-              <Lock size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
               <input
                 id="reg-password"
                 type={showPassword ? 'text' : 'password'}
                 name="password"
                 className="form-input"
-                placeholder="Create a password"
+                placeholder="Create a password (min 6 characters)"
                 value={formData.password}
                 onChange={handleChange}
-                style={{ paddingLeft: '40px', paddingRight: '40px' }}
+                style={{ paddingRight: '40px' }}
                 required
                 minLength={6}
               />
@@ -248,40 +235,41 @@ function Register({ onLogin }) {
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  color: '#666'
+                  color: '#6b7280',
+                  padding: '4px',
+                  display: 'flex'
                 }}
               >
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="reg-confirm-password">Confirm Password</label>
-            <div style={{ position: 'relative' }}>
-              <Lock size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-              <input
-                id="reg-confirm-password"
-                type={showPassword ? 'text' : 'password'}
-                name="confirmPassword"
-                className="form-input"
-                placeholder="Confirm your password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                style={{ paddingLeft: '40px', paddingRight: '40px' }}
-                required
-              />
-            </div>
+            <input
+              id="reg-confirm-password"
+              type="password"
+              name="confirmPassword"
+              className="form-input"
+              placeholder="Confirm your password"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              required
+            />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Creating account...' : 'Register'}
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} disabled={loading}>
+            {loading ? 'Creating account...' : 'Create account'}
           </button>
         </form>
 
         <div className="auth-footer">
           <p>
-            Already have an account? <Link to="/login">Login here</Link>
+            Already have an account?{' '}
+            <Link to="/login" style={{ fontWeight: 600, color: '#111111' }}>
+              Sign in
+            </Link>
           </p>
         </div>
       </div>

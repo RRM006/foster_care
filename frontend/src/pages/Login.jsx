@@ -40,37 +40,36 @@ function Login({ onLogin }) {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-            <Building2 size={48} color="#228B22" aria-hidden="true" />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Building2 size={32} color="#111111" aria-hidden="true" />
+            <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#111111' }}>FCMS</h1>
           </div>
-          <h1>Foster Care</h1>
-          <p>Management System</p>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>Sign in to your account</p>
         </div>
 
-        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label" htmlFor="login-email">Email</label>
-            <div style={{ position: 'relative' }}>
-              <Mail size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
-              <input
-                id="login-email"
-                type="email"
-                className="form-input"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{ paddingLeft: '40px' }}
-                required
-              />
-            </div>
+            <input
+              id="login-email"
+              type="email"
+              className="form-input"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="login-password">Password</label>
             <div style={{ position: 'relative' }}>
-              <Lock size={18} aria-hidden="true" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
               <input
                 id="login-password"
                 type={showPassword ? 'text' : 'password'}
@@ -78,7 +77,7 @@ function Login({ onLogin }) {
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{ paddingLeft: '40px', paddingRight: '40px' }}
+                style={{ paddingRight: '40px' }}
                 required
               />
               <button
@@ -93,22 +92,29 @@ function Login({ onLogin }) {
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  color: '#666'
+                  color: '#6b7280',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
               >
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} disabled={loading}>
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
         <div className="auth-footer">
           <p>
-            Don't have an account? <Link to="/register">Register here</Link>
+            Don't have an account?{' '}
+            <Link to="/register" style={{ fontWeight: 600, color: '#111111' }}>
+              Register here
+            </Link>
           </p>
         </div>
       </div>
