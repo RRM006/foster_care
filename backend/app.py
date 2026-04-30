@@ -142,7 +142,12 @@ def validate_phone(phone):
     """Validate phone number (Bangladesh format)"""
     if not phone:
         return True  # Phone is optional
-    # Bangladesh: +880 followed by 10 digits, or 01 followed by 10 digits
+    # Bangladesh: 11 digits starting with 01 (e.g., 01718964936)
+    # Also accepts +880 format for backwards compatibility
+    digits_only = re.sub(r"\D", "", phone)
+    if len(digits_only) == 11 and digits_only.startswith("01"):
+        return True
+    # Accept old format with +880
     pattern = r"^(\+8801[3-9]\d{8}|01[3-9]\d{9})$"
     return re.match(pattern, phone) is not None
 

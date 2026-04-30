@@ -47,7 +47,14 @@ function Register({ onLogin }) {
   }, [needsAgency]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    
+    if (name === 'phone') {
+      const digitsOnly = value.replace(/\D/g, '').slice(0, 11);
+      setFormData({ ...formData, [name]: digitsOnly });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -156,9 +163,10 @@ function Register({ onLogin }) {
               type="tel"
               name="phone"
               className="form-input"
-              placeholder="+8801234567890"
+              placeholder="e.g., 01718964936"
               value={formData.phone}
               onChange={handleChange}
+              maxLength={11}
             />
           </div>
 
