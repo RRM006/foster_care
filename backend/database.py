@@ -83,6 +83,13 @@ def create_indexes():
 
     # AGENCIES COLLECTION INDEXES
     db.agencies.create_index([("deleted_at", 1)], name="idx_agencies_active")
+    db.agencies.create_index([("setup_complete", 1)], name="idx_agencies_setup")
+    db.agencies.create_index([("admin_id", 1)], name="idx_agencies_admin")
+
+    # GOVERNMENT ADMINS COLLECTION INDEXES
+    db.government_admins.create_index(
+        [("email", 1)], unique=True, name="idx_govadmins_email_unique"
+    )
 
     # DONATIONS COLLECTION INDEXES
     db.donations.create_index(

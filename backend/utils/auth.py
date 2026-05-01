@@ -44,7 +44,12 @@ def get_current_user(token):
 
     # Get user from appropriate collection based on role
     try:
-        if role in ("admin", "staff"):
+        if role == "government_admin":
+            collection = database.get_collection("government_admins")
+            user = collection.find_one({"_id": ObjectId(user_id)})
+            if user:
+                user["collection"] = "government_admins"
+        elif role in ("admin", "staff"):
             collection = database.get_collection("staff")
             user = collection.find_one({"_id": ObjectId(user_id)})
             if user:

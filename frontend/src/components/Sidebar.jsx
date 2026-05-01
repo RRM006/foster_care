@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Users, Heart, Gift, DollarSign, UsersRound, Building2, LogOut, FileText, Menu } from 'lucide-react';
+import { Home, Users, Heart, Gift, DollarSign, UsersRound, Building2, LogOut, FileText, Menu, Shield } from 'lucide-react';
 
 function Sidebar({ user, onLogout, isOpen, onToggle }) {
   const isAdmin = user?.role === 'admin';
   const isStaff = user?.role === 'staff';
+  const isGovAdmin = user?.role === 'government_admin';
 
   return (
     <>
@@ -29,15 +30,19 @@ function Sidebar({ user, onLogout, isOpen, onToggle }) {
 
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-          <Building2 size={24} />
+          {isGovAdmin ? <Shield size={24} /> : <Building2 size={24} />}
           <h1>FCMS</h1>
         </div>
         
-        {(isAdmin || isStaff) && user?.agency_name && (
+        {isGovAdmin && (
+          <p className="sidebar-agency">Government Portal</p>
+        )}
+
+        {!isGovAdmin && (isAdmin || isStaff) && user?.agency_name && (
           <p className="sidebar-agency">{user.agency_name}</p>
         )}
 
-        {!isAdmin && (
+        {!isGovAdmin && !isAdmin && !isStaff && (
           <p className="sidebar-agency">Foster Care Management</p>
         )}
 
@@ -46,44 +51,47 @@ function Sidebar({ user, onLogout, isOpen, onToggle }) {
         <nav className="sidebar-nav">
           <NavLink to="/" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Home size={18} />
-            <span>Dashboard</span>
+            <span>{isGovAdmin ? 'Dashboard' : 'Dashboard'}</span>
           </NavLink>
 
-          {(isAdmin || isStaff) && (
+          {/* Government Admin sees only the dashboard — no center-specific links */}
+          {!isGovAdmin && (isAdmin || isStaff) && (
             <NavLink to="/children" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
               <Users size={18} />
               <span>Children</span>
             </NavLink>
           )}
 
-          {(isAdmin || isStaff) && (
+          {!isGovAdmin && (isAdmin || isStaff) && (
             <NavLink to="/guardians" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
               <Heart size={18} />
               <span>Guardians</span>
             </NavLink>
           )}
 
-          {(isAdmin || isStaff) && (
+          {!isGovAdmin && (isAdmin || isStaff) && (
             <NavLink to="/donors" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
               <Gift size={18} />
               <span>Donors</span>
             </NavLink>
           )}
 
-          {(isAdmin || isStaff) && (
+          {!isGovAdmin && (isAdmin || isStaff) && (
             <NavLink to="/child-records" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
               <FileText size={18} />
               <span>Child Records</span>
             </NavLink>
           )}
 
-          <NavLink to="/donations" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <DollarSign size={18} />
-            <span>Donations</span>
-          </NavLink>
+          {!isGovAdmin && (
+            <NavLink to="/donations" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+              <DollarSign size={18} />
+              <span>Donations</span>
+            </NavLink>
+          )}
         </nav>
 
-        {(isAdmin) && (
+        {!isGovAdmin && (isAdmin) && (
           <>
             <div className="sidebar-section-title">Administration</div>
             <nav className="sidebar-nav">
@@ -108,7 +116,9 @@ function Sidebar({ user, onLogout, isOpen, onToggle }) {
           <div className="sidebar-user">
             <div className="sidebar-user-info">
               <div className="sidebar-user-name">{user?.name}</div>
-              <div className="sidebar-user-role">{user?.role}</div>
+              <div className="sidebar-user-role">
+                {isGovAdmin ? 'Government Admin' : user?.role}
+              </div>
             </div>
           </div>
           

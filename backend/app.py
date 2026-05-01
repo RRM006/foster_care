@@ -88,7 +88,7 @@ CHILD_RECORD_FIELDS = {
 VALID_STATUSES = {"pending", "in_foster", "reunified", "adopted"}
 VALID_GENDERS = {"male", "female", "other", ""}
 VALID_DONOR_TYPES = {"individual", "NGO", "corporate"}
-VALID_ROLES = {"admin", "staff", "donor", "guardian"}
+VALID_ROLES = {"admin", "staff", "donor", "guardian", "government_admin"}
 VALID_STAFF_STATUSES = {"active", "inactive"}
 
 
@@ -209,9 +209,14 @@ def log_audit_event(
 
 
 def get_user_agency_id(user_data):
-    """Get the agency_id from the current user's profile"""
+    """Get the agency_id from the current user's profile.
+    Returns None for government_admin (they are global, not tied to any center)."""
     user_id = user_data.get("user_id")
     role = user_data.get("role")
+
+    # Government admins are global — no agency
+    if role == "government_admin":
+        return None
 
     if role in ("admin", "staff"):
         try:
@@ -238,11 +243,24 @@ def get_user_agency_id(user_data):
     return None
 
 
-# ==================== DECORATORS ====================
+def _collection_for_role(role):
+    """Return the MongoDB collection name that stores users of the given role."""
+    if role == "government_admin":
+        return "government_admins"
+    if role in ("admin", "staff"):
+        return "staff"
+    if role == "donor":
+        return "donors"
+    if role == "guardian":
+        return "guardians"
+    return "staff"  # fallback
+
+
+# ==================== DECORATORS ==
 
 
 def token_required(f):
-    """Decorator to require authentication"""
+    """Decorator to require authentication and enforce agency setup"""
 
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -260,6 +278,36 @@ def token_required(f):
             return error_response("Invalid or expired token", 401)
 
         request.user_data = payload
+
+        # Check agency setup for admin users (skip for setup endpoint)
+        if (
+            not request.path.startswith("/api/agencies/")
+            or "/setup" not in request.path
+        ):
+            if payload.get("role") == "admin":
+                user_id = payload.get("user_id")
+                try:
+                    staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
+                    if staff:
+                        agency_id = staff.get("agency_id")
+                        if agency_id:
+                            agency = get_collection("agencies").find_one(
+                                {"_id": agency_id}
+                            )
+                            if agency and not agency.get("setup_complete", True):
+                                return (
+                                    jsonify(
+                                        {
+                                            "error": "Agency setup incomplete. Please complete setup first.",
+                                            "status": 403,
+                                            "setup_required": True,
+                                        }
+                                    ),
+                                    403,
+                                )
+                except Exception:
+                    pass  # Continue if check fails
+
         return f(*args, **kwargs)
 
     return decorated
@@ -296,6 +344,55 @@ def role_required(roles):
     return decorator
 
 
+def require_agency_setup(f):
+    """Decorator to enforce agency setup completion.
+    Agency admins with incomplete setup can only access the setup endpoint.
+    """
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not hasattr(request, "user_data"):
+            return error_response("Authentication required", 401)
+
+        role = request.user_data.get("role")
+        if role != "admin":
+            # Non-admin users don't need agency setup
+            return f(*args, **kwargs)
+
+        # Check if agency setup is complete
+        user_id = request.user_data.get("user_id")
+        try:
+            staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
+            if not staff:
+                return error_response("User not found", 404)
+
+            agency_id = staff.get("agency_id")
+            if not agency_id:
+                return error_response("User not associated with any agency", 400)
+
+            agency = get_collection("agencies").find_one({"_id": agency_id})
+            if not agency:
+                return error_response("Agency not found", 404)
+
+            if not agency.get("setup_complete", True):
+                return (
+                    jsonify(
+                        {
+                            "error": "Agency setup incomplete. Please complete setup first.",
+                            "status": 403,
+                            "setup_required": True,
+                        }
+                    ),
+                    403,
+                )
+        except Exception as e:
+            return error_response(f"Setup check failed: {str(e)}", 500)
+
+        return f(*args, **kwargs)
+
+    return decorated
+
+
 # ==================== AUTH ROUTES ====================
 
 
@@ -316,10 +413,12 @@ def register():
     password = str(data.get("password"))
     role = str(data.get("role")).strip().lower()
 
-    # Validate role
-    if role not in VALID_ROLES:
+    # Validate role — admin and government_admin cannot self-register
+    allowed_registration_roles = {"staff", "donor", "guardian"}
+    if role not in allowed_registration_roles:
         return error_response(
-            f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}", 400
+            f"Invalid role. Must be one of: {', '.join(allowed_registration_roles)}",
+            400,
         )
 
     # Validate email format
@@ -364,42 +463,23 @@ def register():
         "updated_at": utcnow(),
     }
 
-    # For admin role, create agency first
+    # All self-registration roles require an agency selection
     agency_id = None
-    if role == "admin":
-        agency_name = str(data.get("agencyName", "")).strip()
-        if not agency_name:
-            return error_response("Agency name is required for admin registration", 400)
-
-        agencies_collection = get_collection("agencies")
-        agency_result = agencies_collection.insert_one(
-            {
-                "name": agency_name,
-                "address": str(data.get("address", "")).strip(),
-                "phone": str(data.get("phone", "")).strip(),
-                "email": email,
-                "created_at": utcnow(),
-                "updated_at": utcnow(),
-            }
+    provided_agency_id = data.get("agency_id")
+    if not provided_agency_id:
+        return error_response(
+            "Agency selection is required for staff/donor/guardian", 400
         )
-        agency_id = agency_result.inserted_id
-    elif role in ("staff", "donor", "guardian"):
-        # Get agency_id from request for non-admin roles
-        provided_agency_id = data.get("agency_id")
-        if not provided_agency_id:
-            return error_response(
-                "Agency selection is required for staff/donor/guardian", 400
-            )
 
-        # Validate agency exists
-        try:
-            agency_obj_id = ObjectId(provided_agency_id)
-            agency = get_collection("agencies").find_one({"_id": agency_obj_id})
-            if not agency:
-                return error_response("Invalid agency selected", 400)
-            agency_id = agency_obj_id
-        except InvalidId:
-            return error_response("Invalid agency ID format", 400)
+    # Validate agency exists and setup is complete
+    try:
+        agency_obj_id = ObjectId(provided_agency_id)
+        agency = get_collection("agencies").find_one({"_id": agency_obj_id})
+        if not agency:
+            return error_response("Invalid agency selected", 400)
+        agency_id = agency_obj_id
+    except InvalidId:
+        return error_response("Invalid agency ID format", 400)
 
     if role == "donor":
         donor_type = str(data.get("donor_type", "individual")).strip()
@@ -415,8 +495,8 @@ def register():
         user_data["verified"] = False
         user_data["child_id"] = data.get("child_id", None)
         user_data["agency_id"] = agency_id
-    elif role in ("staff", "admin"):
-        user_data["role_field"] = role
+    elif role == "staff":
+        user_data["role_field"] = "staff"
         user_data["status"] = "active"
         user_data["agency_id"] = agency_id
         user_data["phone"] = str(data.get("phone", "")).strip()
@@ -478,11 +558,18 @@ def login():
     user = None
     role = None
 
-    # Check staff (admin)
-    staff_col = get_collection("staff")
-    user = staff_col.find_one({"email": email})
+    # Check government_admins first (global role)
+    gov_col = get_collection("government_admins")
+    user = gov_col.find_one({"email": email})
     if user:
-        role = user.get("role_field", "staff")
+        role = "government_admin"
+
+    # Check staff (admin/staff)
+    if not user:
+        staff_col = get_collection("staff")
+        user = staff_col.find_one({"email": email})
+        if user:
+            role = user.get("role_field", "staff")
 
     # Check donors
     if not user:
@@ -519,13 +606,17 @@ def login():
         user.get("agency_id"),
     )
 
-    # Get agency name if applicable
+    # Get agency info if applicable
     agency_name = None
+    setup_complete = True  # default for non-admin roles
     agency_id = user.get("agency_id")
     if agency_id:
         agency = get_collection("agencies").find_one({"_id": agency_id})
         if agency:
             agency_name = agency.get("name")
+            # For agency admins, check if setup is complete
+            if role == "admin":
+                setup_complete = agency.get("setup_complete", True)
 
     return success_response(
         {
@@ -537,6 +628,7 @@ def login():
                 "email": user.get("email"),
                 "role": role,
                 "agency_name": agency_name,
+                "setup_complete": setup_complete,
             },
         }
     )
@@ -551,9 +643,8 @@ def get_current_user_info():
     role = payload.get("role")
 
     try:
-        collection = get_collection(
-            "staff" if role in ("admin", "staff") else f"{role}s"
-        )
+        col_name = _collection_for_role(role)
+        collection = get_collection(col_name)
         user = collection.find_one({"_id": ObjectId(user_id)})
     except InvalidId:
         return error_response("Invalid user ID", 400)
@@ -563,6 +654,12 @@ def get_current_user_info():
 
     user["_id"] = str(user["_id"])
     user.pop("password", None)
+
+    # Attach setup_complete for agency admins
+    if role == "admin" and user.get("agency_id"):
+        agency = get_collection("agencies").find_one({"_id": user["agency_id"]})
+        if agency:
+            user["setup_complete"] = agency.get("setup_complete", True)
 
     return jsonify({"user": user})
 
@@ -580,9 +677,8 @@ def update_profile():
         return error_response("Request body is required", 400)
 
     try:
-        collection = get_collection(
-            "staff" if role in ("admin", "staff") else f"{role}s"
-        )
+        col_name = _collection_for_role(role)
+        collection = get_collection(col_name)
         update_data = {}
 
         if data.get("name"):
@@ -629,9 +725,8 @@ def change_password():
         return error_response("New password must be at least 6 characters", 400)
 
     try:
-        collection = get_collection(
-            "staff" if role in ("admin", "staff") else f"{role}s"
-        )
+        col_name = _collection_for_role(role)
+        collection = get_collection(col_name)
         user = collection.find_one({"_id": ObjectId(user_id)})
 
         if not user:
@@ -1496,15 +1591,22 @@ def get_donation(donation_id):
 @app.route("/api/agencies", methods=["GET"])
 @token_required
 def get_agencies():
-    """Get all agencies with pagination (admin sees own agency only)"""
+    """Get all agencies with pagination.
+    - Government admins: see all agencies
+    - Agency admins: see only their own agency
+    """
     role = request.user_data.get("role")
     page, limit, skip = get_pagination_params()
 
-    agency_id = get_user_agency_id(request.user_data)
-    if role == "admin" and agency_id:
-        query = get_soft_delete_query({"_id": agency_id})
-    else:
+    if role == "government_admin":
+        # Government admins see all agencies
         query = get_soft_delete_query({})
+    else:
+        agency_id = get_user_agency_id(request.user_data)
+        if role == "admin" and agency_id:
+            query = get_soft_delete_query({"_id": agency_id})
+        else:
+            query = get_soft_delete_query({})
 
     total = get_collection("agencies").count_documents(query)
     agencies_list = list(get_collection("agencies").find(query).skip(skip).limit(limit))
@@ -1536,9 +1638,12 @@ def get_agencies_public():
 @app.route("/api/agencies", methods=["POST"])
 @token_required
 def create_agency():
-    """Create a new agency"""
+    """Create a new agency.
+    - Government admin: can create agency with admin_email and admin_password
+    - Agency admin/staff: can create agency (original behavior)
+    """
     role = request.user_data.get("role")
-    if role not in ("admin", "staff"):
+    if role not in ("admin", "staff", "government_admin"):
         return error_response("Insufficient permissions", 403)
 
     data = request.get_json()
@@ -1551,9 +1656,84 @@ def create_agency():
     agency_data = sanitize_data(data, AGENCY_FIELDS)
     agency_data["created_at"] = utcnow()
     agency_data["updated_at"] = utcnow()
+    agency_data["setup_complete"] = False
+    agency_data["admin_id"] = None
+
+    # If government admin is creating the agency, set up admin credentials
+    if role == "government_admin":
+        admin_email = data.get("admin_email")
+        admin_password = data.get("admin_password")
+
+        if not admin_email or not admin_password:
+            return error_response(
+                "admin_email and admin_password are required for government admin", 400
+            )
+
+        if not validate_email(admin_email):
+            return error_response("Invalid admin email format", 400)
+
+        if len(admin_password) < 6:
+            return error_response("Admin password must be at least 6 characters", 400)
+
+        agency_data["admin_email"] = admin_email
 
     result = get_collection("agencies").insert_one(agency_data)
+    agency_id = result.inserted_id
 
+    # If government admin created the agency, also create the admin user in staff collection
+    if role == "government_admin" and admin_email and admin_password:
+        staff_collection = get_collection("staff")
+        # Check if admin already exists
+        if staff_collection.find_one({"email": admin_email}):
+            # Rollback agency creation
+            get_collection("agencies").delete_one({"_id": agency_id})
+            return error_response("Admin email already registered", 400)
+
+        admin_user = {
+            "agency_id": agency_id,
+            "full_name": data.get("admin_name", "Agency Admin"),
+            "email": admin_email,
+            "password": hash_password(admin_password),
+            "role_field": "admin",
+            "phone": data.get("admin_phone", ""),
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+            "deleted_at": None,
+        }
+        staff_result = staff_collection.insert_one(admin_user)
+        # Update agency with admin_id
+        get_collection("agencies").update_one(
+            {"_id": agency_id},
+            {
+                "$set": {
+                    "admin_id": staff_result.inserted_id,
+                    "admin_email": admin_email,
+                }
+            },
+        )
+
+        # Log audit event
+        log_audit_event(
+            request.user_data.get("user_id"),
+            "create",
+            "agencies",
+            str(agency_id),
+            None,
+            {"name": agency_data.get("name"), "admin_email": admin_email},
+            None,
+        )
+
+        return success_response(
+            {
+                "message": "Agency created successfully with admin credentials",
+                "agency_id": str(agency_id),
+                "admin_email": admin_email,
+                "setup_complete": False,
+            },
+            201,
+        )
+
+    # Original behavior for agency admin/staff
     return success_response(
         {
             "message": "Agency created successfully",
@@ -1577,6 +1757,126 @@ def get_agency(agency_id):
 
     agency["_id"] = str(agency["_id"])
     return jsonify({"agency": agency})
+
+
+@app.route("/api/agencies/<agency_id>", methods=["DELETE"])
+@token_required
+def delete_agency(agency_id):
+    """Delete an agency (soft delete) - Government admin only"""
+    if request.user_data.get("role") != "government_admin":
+        return error_response("Government admin access required", 403)
+
+    user_id = request.user_data.get("user_id")
+
+    try:
+        deleted = soft_delete_record("agencies", agency_id, user_id)
+    except InvalidId:
+        return error_response("Invalid agency ID format", 400)
+
+    if not deleted:
+        return error_response("Agency not found", 404)
+
+    # Also soft-delete all related records (children, staff, donors, etc.)
+    agency_obj_id = ObjectId(agency_id)
+    get_collection("children").update_many(
+        {"agency_id": agency_obj_id, "deleted_at": None},
+        {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+    )
+    get_collection("staff").update_many(
+        {"agency_id": agency_obj_id, "deleted_at": None},
+        {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+    )
+    get_collection("donors").update_many(
+        {"agency_id": agency_obj_id, "deleted_at": None},
+        {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+    )
+    get_collection("donations").update_many(
+        {"agency_id": agency_obj_id, "deleted_at": None},
+        {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+    )
+    get_collection("guardians").update_many(
+        {"agency_id": agency_obj_id, "deleted_at": None},
+        {"$set": {"deleted_at": utcnow(), "deleted_by": user_id}},
+    )
+
+    # Log audit event
+    log_audit_event(user_id, "delete", "agencies", agency_id, None, None, None)
+
+    return success_response(
+        "Agency and related records deleted successfully (soft delete)"
+    )
+
+
+@app.route("/api/agencies/<agency_id>/setup", methods=["PUT"])
+@token_required
+def complete_agency_setup(agency_id):
+    """Complete agency first-time setup - Agency admin only"""
+    role = request.user_data.get("role")
+    if role != "admin":
+        return error_response("Agency admin access required", 403)
+
+    user_id = request.user_data.get("user_id")
+
+    # Get the agency
+    try:
+        agency = get_collection("agencies").find_one({"_id": ObjectId(agency_id)})
+    except InvalidId:
+        return error_response("Invalid agency ID format", 400)
+
+    if not agency:
+        return error_response("Agency not found", 404)
+
+    # Verify the admin belongs to this agency
+    user_agency_id = get_user_agency_id(request.user_data)
+    if str(user_agency_id) != agency_id:
+        return error_response("You can only setup your own agency", 403)
+
+    # Check if already setup
+    if agency.get("setup_complete"):
+        return error_response("Agency setup already completed", 400)
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    # Fields that can be updated during setup
+    allowed_setup_fields = {"name", "address", "phone", "email", "description"}
+    update_data = sanitize_data(data, allowed_setup_fields)
+
+    if not update_data.get("name"):
+        return error_response("name is required", 400)
+
+    update_data["setup_complete"] = True
+    update_data["updated_at"] = utcnow()
+
+    # Store old values for audit
+    old_values = {k: agency.get(k) for k in allowed_setup_fields if k in agency}
+
+    result = get_collection("agencies").update_one(
+        {"_id": ObjectId(agency_id)}, {"$set": update_data}
+    )
+
+    if result.modified_count == 0:
+        return error_response("No changes made", 400)
+
+    # Log audit event
+    log_audit_event(
+        user_id,
+        "update",
+        "agencies",
+        agency_id,
+        old_values,
+        update_data,
+        ObjectId(agency_id),
+    )
+
+    return success_response(
+        {
+            "message": "Agency setup completed successfully",
+            "setup_complete": True,
+            "agency": {**agency, **update_data, "_id": str(agency["_id"])},
+        }
+    )
 
 
 # ==================== CHILD RECORDS ROUTES ====================
@@ -1976,6 +2276,271 @@ def get_audit_logs():
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "ok", "message": "FCMS API is running"})
+
+
+# ==================== AGENCY SETUP ROUTE ====================
+
+
+@app.route("/api/agencies/setup", methods=["PUT"])
+@token_required
+def agency_setup():
+    """First-time agency setup — admin fills in center details.
+    Can only be called when setup_complete is False."""
+    role = request.user_data.get("role")
+    if role != "admin":
+        return error_response("Only agency admins can complete setup", 403)
+
+    agency_id = get_user_agency_id(request.user_data)
+    if not agency_id:
+        return error_response("User is not associated with any agency", 400)
+
+    # Check current setup status
+    agency = get_collection("agencies").find_one({"_id": agency_id})
+    if not agency:
+        return error_response("Agency not found", 404)
+
+    if agency.get("setup_complete", False):
+        return error_response("Agency setup is already complete", 400)
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    # Require at least the agency name
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return error_response("Agency name is required", 400)
+
+    update_data = {
+        "name": name,
+        "address": str(data.get("address", "")).strip(),
+        "phone": str(data.get("phone", "")).strip(),
+        "email": str(data.get("email", "")).strip(),
+        "setup_complete": True,
+        "updated_at": utcnow(),
+    }
+
+    get_collection("agencies").update_one({"_id": agency_id}, {"$set": update_data})
+
+    # Audit log
+    user_id = request.user_data.get("user_id")
+    log_audit_event(
+        user_id,
+        "setup_complete",
+        "agencies",
+        str(agency_id),
+        None,
+        update_data,
+        agency_id,
+    )
+
+    return success_response("Agency setup completed successfully")
+
+
+# ==================== GOVERNMENT ADMIN ROUTES ====================
+
+
+@app.route("/api/gov/agencies", methods=["GET"])
+@role_required(["government_admin"])
+def gov_get_agencies():
+    """List ALL agencies with stats (Government Admin only)"""
+    page, limit, skip = get_pagination_params()
+    search = request.args.get("search", "").strip()
+
+    query = get_soft_delete_query({})
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = get_collection("agencies").count_documents(query)
+    agencies_list = list(
+        get_collection("agencies")
+        .find(query)
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+
+    # Enrich each agency with stats
+    for agency in agencies_list:
+        aid = agency["_id"]
+        agency["children_count"] = get_collection("children").count_documents(
+            get_soft_delete_query({"agency_id": aid})
+        )
+        agency["staff_count"] = get_collection("staff").count_documents(
+            get_soft_delete_query({"agency_id": aid})
+        )
+        agency["donors_count"] = get_collection("donors").count_documents(
+            get_soft_delete_query({"agency_id": aid})
+        )
+        # Get admin email
+        admin_user = get_collection("staff").find_one(
+            {"agency_id": aid, "role_field": "admin"}
+        )
+        agency["admin_email"] = admin_user.get("email") if admin_user else None
+        agency["_id"] = str(agency["_id"])
+
+    return jsonify(
+        {
+            "agencies": agencies_list,
+            "page": page,
+            "limit": limit,
+            "total": total,
+        }
+    )
+
+
+@app.route("/api/gov/agencies", methods=["POST"])
+@role_required(["government_admin"])
+def gov_create_agency():
+    """Create a new agency + its admin user (Government Admin only).
+    Accepts: { email, password }
+    Creates: 1 agency doc (setup_complete=false) + 1 staff doc (role_field=admin)
+    """
+    data = request.get_json()
+    if not data:
+        return error_response("Request body is required", 400)
+
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+
+    if not email or not password:
+        return error_response("Email and password are required", 400)
+
+    if not validate_email(email):
+        return error_response("Invalid email format", 400)
+
+    if len(password) < 6:
+        return error_response("Password must be at least 6 characters", 400)
+
+    # Check email uniqueness across staff collection
+    if get_collection("staff").find_one({"email": email}):
+        return error_response("Email already registered", 400)
+
+    # 1. Create agency (minimal — setup_complete=False, admin fills details later)
+    agency_data = {
+        "name": "",
+        "address": "",
+        "phone": "",
+        "email": email,
+        "setup_complete": False,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    agency_result = get_collection("agencies").insert_one(agency_data)
+    agency_id = agency_result.inserted_id
+
+    # 2. Create admin staff user for this agency
+    admin_data = {
+        "full_name": "Agency Admin",
+        "email": email,
+        "password": hash_password(password),
+        "role": "admin",
+        "role_field": "admin",
+        "status": "active",
+        "agency_id": agency_id,
+        "phone": "",
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    admin_result = get_collection("staff").insert_one(admin_data)
+
+    # 3. Link admin to agency
+    get_collection("agencies").update_one(
+        {"_id": agency_id},
+        {"$set": {"admin_id": admin_result.inserted_id}},
+    )
+
+    # Audit log
+    gov_user_id = request.user_data.get("user_id")
+    log_audit_event(
+        gov_user_id,
+        "create",
+        "agencies",
+        agency_id,
+        None,
+        {"email": email, "created_by": "government_admin"},
+        None,
+    )
+
+    return success_response(
+        {
+            "message": "Agency created successfully",
+            "agency_id": str(agency_id),
+            "admin_email": email,
+        },
+        201,
+    )
+
+
+@app.route("/api/gov/agencies/<agency_id>", methods=["DELETE"])
+@role_required(["government_admin"])
+def gov_delete_agency(agency_id):
+    """Soft-delete an agency (Government Admin only)"""
+    gov_user_id = request.user_data.get("user_id")
+
+    try:
+        agency_obj_id = ObjectId(agency_id)
+    except InvalidId:
+        return error_response("Invalid agency ID format", 400)
+
+    agency = get_collection("agencies").find_one({"_id": agency_obj_id})
+    if not agency:
+        return error_response("Agency not found", 404)
+
+    # Soft delete the agency
+    deleted = soft_delete_record("agencies", agency_id, gov_user_id)
+    if not deleted:
+        return error_response("Failed to delete agency", 500)
+
+    # Audit log
+    log_audit_event(
+        gov_user_id,
+        "delete",
+        "agencies",
+        agency_id,
+        {"name": agency.get("name")},
+        None,
+        None,
+    )
+
+    return success_response("Agency deleted successfully (soft delete)")
+
+
+@app.route("/api/gov/stats", methods=["GET"])
+@role_required(["government_admin"])
+def gov_get_stats():
+    """Get global statistics across ALL agencies (Government Admin only)"""
+    active_query = get_soft_delete_query({})
+
+    stats = {
+        "total_agencies": get_collection("agencies").count_documents(active_query),
+        "total_children": get_collection("children").count_documents(active_query),
+        "total_guardians": get_collection("guardians").count_documents(active_query),
+        "total_donors": get_collection("donors").count_documents(active_query),
+        "total_staff": get_collection("staff").count_documents(active_query),
+        "total_donations": get_collection("donations").count_documents({}),
+        "pending_children": get_collection("children").count_documents(
+            get_soft_delete_query({"current_status": "pending"})
+        ),
+        "in_foster": get_collection("children").count_documents(
+            get_soft_delete_query({"current_status": "in_foster"})
+        ),
+        "agencies_pending_setup": get_collection("agencies").count_documents(
+            get_soft_delete_query({"setup_complete": False})
+        ),
+    }
+
+    # Get total donation amount
+    pipeline = [
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    result = list(get_collection("donations").aggregate(pipeline))
+    stats["total_donation_amount"] = result[0]["total"] if result else 0
+
+    return jsonify(stats)
 
 
 # ==================== ERROR HANDLERS ====================

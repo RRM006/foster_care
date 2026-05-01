@@ -125,4 +125,15 @@ export const upload = {
   },
 };
 
+export const gov = {
+  getAgencies: (page = 1, limit = 50) => api.get(`/gov/agencies?page=${page}&limit=${limit}`),
+  createAgency: (data) => api.post('/gov/agencies', data),
+  deleteAgency: (id) => api.delete(`/gov/agencies/${id}`),
+  getStats: () => api.get('/gov/stats'),
+};
+
+export const agencySetup = {
+  complete: (data) => api.put('/agencies/setup', data),
+};
+
 export default api;

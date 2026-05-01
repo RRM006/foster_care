@@ -11,6 +11,8 @@ import Staff from './pages/Staff';
 import Agencies from './pages/Agencies';
 import ChildRecords from './pages/ChildRecords';
 import NotFound from './pages/NotFound';
+import GovDashboard from './pages/GovDashboard';
+import AgencySetup from './pages/AgencySetup';
 import Sidebar from './components/Sidebar';
 
 function App() {
@@ -38,6 +40,13 @@ function App() {
     setUser(null);
   };
 
+  const handleSetupComplete = (agencyName) => {
+    // Update user state with setup_complete = true and the new agency name
+    const updatedUser = { ...user, setup_complete: true, agency_name: agencyName };
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    setUser(updatedUser);
+  };
+
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
   };
@@ -46,6 +55,7 @@ function App() {
     return <div className="loading"><div className="spinner"></div></div>;
   }
 
+  // Not logged in — show auth pages
   if (!user) {
     return (
       <BrowserRouter>
@@ -58,6 +68,35 @@ function App() {
     );
   }
 
+  // Government Admin — separate portal with no sidebar nav for center management
+  if (user.role === 'government_admin') {
+    return (
+      <BrowserRouter>
+        <div className="app-container">
+          <Sidebar user={user} onLogout={handleLogout} isOpen={sidebarOpen} onToggle={toggleSidebar} />
+          <main className="main-content">
+            <Routes>
+              <Route path="/" element={<GovDashboard user={user} />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </main>
+        </div>
+      </BrowserRouter>
+    );
+  }
+
+  // Agency Admin with pending setup — force setup page
+  if (user.role === 'admin' && user.setup_complete === false) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="*" element={<AgencySetup user={user} onSetupComplete={handleSetupComplete} />} />
+        </Routes>
+      </BrowserRouter>
+    );
+  }
+
+  // Normal authenticated flow (admin, staff, donor, guardian)
   return (
     <BrowserRouter>
       <div className="app-container">
