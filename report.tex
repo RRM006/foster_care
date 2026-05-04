@@ -1,0 +1,138 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    rulecolor=\color{black!30},
+    keywordstyle=\color{blue},
+    stringstyle=\color{red}
+}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries Foster Care Management System\par}
+    \vspace{1.5cm}
+    {\Large\bfseries Project Report\par}
+    \vspace{2cm}
+    
+    {\Large Course: CSE 411 - Advanced Database Systems\par}
+    \vspace{2.5cm}
+    
+    {\Large \textbf{Submitted By:}\par}
+    \vspace{0.5cm}
+    {\Large Rafiur Rahman Mashrafi (ID: 2221971042)\par}
+    \vspace{0.2cm}
+    {\Large Md. Nafiul Alam Chowdhury (ID: 2231774642)\par}
+    
+    \vfill
+    {\Large \today\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+The Foster Care Management System is a comprehensive platform designed to streamline and manage the operations of multiple foster care centers (agencies). The system handles the complex relationships between agencies, orphaned children, guardians (foster families), donors, and staff members. Given the hierarchical and document-oriented nature of the data, a NoSQL approach using MongoDB was chosen for the database backend.
+
+\section{System Architecture}
+The core of our project relies on a multi-center architecture. Each foster care agency operates independently while maintaining a centralized database structure. 
+
+\subsection{Technology Stack}
+\begin{itemize}
+    \item \textbf{Database:} MongoDB (hosted on MongoDB Atlas cloud)
+    \item \textbf{Backend:} Python (Flask framework)
+    \item \textbf{Database Driver:} PyMongo
+    \item \textbf{Authentication:} JSON Web Tokens (JWT) and Bcrypt hashing
+\end{itemize}
+
+\section{Database Design and Schema}
+MongoDB was chosen to accommodate flexible schema designs. The system consists of the following primary collections:
+
+\begin{itemize}
+    \item \textbf{agencies}: Stores information about individual foster care centers.
+    \item \textbf{children}: Records of orphaned children, linked via \texttt{agency\_id}.
+    \item \textbf{donors}: Individuals or NGOs providing financial support.
+    \item \textbf{guardians}: Foster families and verified guardians.
+    \item \textbf{staff}: Social workers and agency administrators.
+    \item \textbf{donations}: Tracking of financial contributions.
+    \item \textbf{child\_records}: Health, education, and visit history for each child.
+\end{itemize}
+
+The schema heavily utilizes foreign key references (using MongoDB \texttt{ObjectId}) to link entities. For instance, almost all entities (children, donors, staff, guardians) are tied to a specific \texttt{agency\_id} to ensure data isolation across different centers.
+
+\section{How the Database Works}
+When a new agency is registered, an Admin is created. The Admin can then add staff, admit children, and register donors. When a donation is made, a document is inserted into the \texttt{donations} collection referencing both the \texttt{donor\_id} and the \texttt{agency\_id}. 
+
+Security is integrated at the database level where passwords for staff, donors, and guardians are stored as Bcrypt hashes, ensuring that sensitive data is never exposed in plaintext.
+
+\section{Instructions for Faculty Evaluation}
+To simplify the evaluation process, the frontend and backend applications are not required to be executed. The database is hosted on MongoDB Atlas and has been configured to allow remote queries. You can verify our database implementation, schema, and sample data directly using the provided credentials.
+
+\subsection{Connection Credentials}
+\begin{itemize}
+    \item \textbf{Database Name:} fosterdb
+    \item \textbf{Username:} fosterdb
+    \item \textbf{Password:} QjUmTm2zLmmjHVso
+    \item \textbf{Connection String (URI):} \\
+    \texttt{mongodb+srv://fosterdb:QjUmTm2zLmmjHVso@dbprojectcluster.jbou71h.mongodb.net/fosterdb}
+\end{itemize}
+
+\subsection{How to Connect and Query}
+You can verify our work using any of the following methods:
+
+\subsubsection{Method 1: Using MongoDB Compass (Recommended GUI)}
+1. Download and open \textbf{MongoDB Compass}.
+2. Paste the provided Connection String into the URI field.
+3. Click \textbf{Connect}.
+4. Navigate to the \texttt{fosterdb} database to view all collections (\texttt{agencies}, \texttt{children}, \texttt{donors}, etc.) and inspect the documents directly.
+
+\subsubsection{Method 2: Using MongoDB Shell (mongosh)}
+Open your terminal or command prompt and run:
+\begin{lstlisting}[language=bash]
+mongosh "mongodb+srv://fosterdb:QjUmTm2zLmmjHVso@dbprojectcluster.jbou71h.mongodb.net/fosterdb"
+\end{lstlisting}
+Once connected, you can run queries such as:
+\begin{lstlisting}[language=SQL]
+show collections
+db.children.find().pretty()
+db.donations.countDocuments()
+\end{lstlisting}
+
+\subsubsection{Method 3: Using a Python Script}
+If you prefer to test programmatically, you can use the following Python script with the \texttt{pymongo} library:
+
+\begin{lstlisting}[language=Python]
+from pymongo import MongoClient
+
+uri = "mongodb+srv://fosterdb:QjUmTm2zLmmjHVso@dbprojectcluster.jbou71h.mongodb.net/fosterdb"
+client = MongoClient(uri)
+db = client['fosterdb']
+
+print("Connected successfully!")
+print("Collections:", db.list_collection_names())
+
+# Example Query
+children = db.children.find()
+for child in children:
+    print(child['full_name'])
+\end{lstlisting}
+
+\section{Conclusion}
+By utilizing a NoSQL database system, we achieved a highly scalable and flexible architecture capable of managing complex, multi-center operations for foster care facilities. The database is fully operational and populated with initial test data ready for evaluation.
+
+\end{document}
