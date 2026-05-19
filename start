@@ -2,26 +2,93 @@
 
 echo "Starting Foster Care Management System..."
 
-# Start backend
-cd backend
-source venv/bin/activate
-python app.py &
+# Get the project root directory
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT" || exit 1
+
+# === Step 1: Start MongoDB ===
+echo "Starting MongoDB..."
+MONGODB_DIR="$PROJECT_ROOT/mongodb"
+MONGODB_DATA="$MONGODB_DIR/data"
+MONGODB_LOG="$MONGODB_DIR/mongo.log"
+
+# Create data directory if it doesn't exist
+mkdir -p "$MONGODB_DATA"
+
+# Check if MongoDB is already running
+if pgrep -x "mongod" > /dev/null; then
+    echo "✓ MongoDB is already running"
+else
+    # Start MongoDB
+    "$MONGODB_DIR/bin/mongod" --dbpath "$MONGODB_DATA" --port 27017 --fork --logpath "$MONGODB_LOG" --bind_ip 127.0.0.1
+    sleep 2
+    echo "✓ MongoDB started"
+fi
+
+# === Step 2: Start Backend ===
+echo "Starting backend..."
+cd "$PROJECT_ROOT/backend" || exit 1
+
+# Check if virtual environment exists
+if [ ! -d "venv" ]; then
+    echo "Creating Python virtual environment..."
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -q -r requirements.txt
+else
+    source venv/bin/activate
+fi
+
+# Start backend in background
+nohup python app.py > /tmp/fcms_backend.log 2>&1 &
 BACKEND_PID=$!
+sleep 3
 
-# Go back to root and start frontend
-cd ../frontend
-npm run dev &
+# Check if backend started successfully
+if ps -p $BACKEND_PID > /dev/null 2>&1 || pgrep -f "python app.py" > /dev/null; then
+    echo "✓ Backend started (PID: $BACKEND_PID)"
+else
+    echo "✗ Backend failed to start. Check /tmp/fcms_backend.log"
+    exit 1
+fi
+
+# === Step 3: Start Frontend ===
+echo "Starting frontend..."
+cd "$PROJECT_ROOT/frontend" || exit 1
+
+# Check if node_modules exists
+if [ ! -d "node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    npm install
+fi
+
+# Start frontend in background
+npm run dev > /tmp/fcms_frontend.log 2>&1 &
 FRONTEND_PID=$!
+sleep 5
 
-echo "✓ Backend started (PID: $BACKEND_PID)"
-echo "✓ Frontend started (PID: $FRONTEND_PID)"
+# Check if frontend started successfully
+if ps -p $FRONTEND_PID > /dev/null 2>&1; then
+    echo "✓ Frontend started (PID: $FRONTEND_PID)"
+else
+    echo "✗ Frontend failed to start. Check /tmp/fcms_frontend.log"
+    kill $BACKEND_PID 2>/dev/null
+    exit 1
+fi
+
+# === Summary ===
 echo ""
-echo "Access the app at: http://localhost:5173"
-echo "Backend API at: http://localhost:5000"
+echo "========================================"
+echo "  Foster Care Management System is READY!"
+echo "========================================"
+echo "  Frontend:  http://localhost:5173"
+echo "  Backend:   http://localhost:5000"
+echo "========================================"
 echo ""
-echo "Press Ctrl+C to stop both services..."
+echo "Press Ctrl+C to stop all services..."
 
-# Wait for Ctrl+C
-trap "echo ''; echo 'Stopping services...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT TERM
+# Trap Ctrl+C and terminate all background processes
+trap 'echo ""; echo "Stopping services..."; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; pkill -f "mongod" 2>/dev/null; echo "Services stopped."; exit 0' INT TERM
 
+# Wait for all background processes
 wait

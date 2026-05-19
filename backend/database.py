@@ -10,7 +10,17 @@ def init_db():
     """Initialize database connection and create indexes"""
     global client, db
     try:
-        client = MongoClient(Config.MONGO_URI, tlsCAFile=certifi.where())
+        # Only use SSL for remote connections (Atlas)
+        if (
+            Config.MONGO_URI.startswith("mongodb+srv")
+            or "ssl=true" in Config.MONGO_URI
+            or "ssl=" in Config.MONGO_URI
+        ):
+            client = MongoClient(Config.MONGO_URI, tlsCAFile=certifi.where())
+        else:
+            # Local connection - no SSL
+            client = MongoClient(Config.MONGO_URI)
+
         db = client[Config.DATABASE_NAME]
 
         # Test connection

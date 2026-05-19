@@ -279,34 +279,32 @@ def token_required(f):
 
         request.user_data = payload
 
-        # Check agency setup for admin users (skip for setup endpoint)
-        if (
-            not request.path.startswith("/api/agencies/")
-            or "/setup" not in request.path
-        ):
-            if payload.get("role") == "admin":
-                user_id = payload.get("user_id")
-                try:
-                    staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
-                    if staff:
-                        agency_id = staff.get("agency_id")
-                        if agency_id:
-                            agency = get_collection("agencies").find_one(
-                                {"_id": agency_id}
+        # Skip setup check for the setup endpoint itself
+        is_setup_endpoint = (
+            request.path.startswith("/api/agencies/") and "/setup" in request.path
+        )
+
+        if not is_setup_endpoint and payload.get("role") == "admin":
+            user_id = payload.get("user_id")
+            try:
+                staff = get_collection("staff").find_one({"_id": ObjectId(user_id)})
+                if staff:
+                    agency_id = staff.get("agency_id")
+                    if agency_id:
+                        agency = get_collection("agencies").find_one({"_id": agency_id})
+                        if agency and not agency.get("setup_complete", True):
+                            return (
+                                jsonify(
+                                    {
+                                        "error": "Agency setup incomplete. Please complete setup first.",
+                                        "status": 403,
+                                        "setup_required": True,
+                                    }
+                                ),
+                                403,
                             )
-                            if agency and not agency.get("setup_complete", True):
-                                return (
-                                    jsonify(
-                                        {
-                                            "error": "Agency setup incomplete. Please complete setup first.",
-                                            "status": 403,
-                                            "setup_required": True,
-                                        }
-                                    ),
-                                    403,
-                                )
-                except Exception:
-                    pass  # Continue if check fails
+            except Exception:
+                pass  # Continue if check fails
 
         return f(*args, **kwargs)
 
@@ -1874,7 +1872,6 @@ def complete_agency_setup(agency_id):
         {
             "message": "Agency setup completed successfully",
             "setup_complete": True,
-            "agency": {**agency, **update_data, "_id": str(agency["_id"])},
         }
     )
 

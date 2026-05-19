@@ -14,7 +14,7 @@ from pymongo import MongoClient
 
 # Direct connection using resolved hostnames (bypassing SRV DNS issue)
 # The SRV record resolves to ac-iwclzo7 but connection string uses dbprojectcluster
-DIRECT_URI = "mongodb://fosterdb:QjUmTm2zLmmjHVso@ac-iwclzo7-shard-00-00.jbou71h.mongodb.net:27017,ac-iwclzo7-shard-00-02.jbou71h.mongodb.net:27017/?ssl=true&replicaSet=atlas-xxxxxx&authSource=admin&retryWrites=true&w=majority"
+DIRECT_URI = "mongodb://<USERNAME>:<PASSWORD>@<CLUSTER_URL_1>,<CLUSTER_URL_2>/?ssl=true&replicaSet=atlas-xxxxxx&authSource=admin&retryWrites=true&w=majority"
 
 print("Testing MongoDB connection (Direct)...")
 print("Connecting to: ac-iwclzo7-shard-00-xx.jbou71h.mongodb.net")
@@ -22,7 +22,7 @@ print("Connecting to: ac-iwclzo7-shard-00-xx.jbou71h.mongodb.net")
 try:
     # Try direct connection without SRV
     client = MongoClient(
-        "mongodb://fosterdb:QjUmTm2zLmmjHVso@ac-iwclzo7-shard-00-00.jbou71h.mongodb.net:27017/?ssl=true&authSource=admin",
+        "mongodb://<USERNAME>:<PASSWORD>@<CLUSTER_URL_1>/?ssl=true&authSource=admin",
         serverSelectionTimeoutMS=5000,
         directConnection=True,
     )

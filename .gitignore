@@ -58,6 +58,7 @@ uploads/
 
 # MongoDB
 *.mongodump
+mongodb/
 
 # Logs
 logs/
@@ -70,9 +71,4 @@ htmlcov/
 .coverage
 
 # Documentation (keep locally, don't commit)
-Guide.md
-MongoDB_Atlas_Setup_Guide.md
-walkthrough.md
-plan.md
-NoSQL_Analysis.md
-DESIGN.md
+
